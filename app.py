@@ -142,6 +142,10 @@ def show_detail(symbol, df, context=None):
     st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요. "
                "베타는 시장(1.0)보다 얼마나 더/덜 출렁이는지예요.")
 
+    # 📍 그룹(섹터/테마) 내 위치 — context 있을 때만
+    if context:
+        render_peer_summary(symbol, context)
+
     # 💎 펀더멘털 (재무 건강)
     fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
@@ -279,7 +283,7 @@ def render_stock_table(rows, key, context=None):
         return
     st.caption("👇 종목을 선택하면(왼쪽 선택칸 클릭) 아래에 상세가 펼쳐져요")
     table = pd.DataFrame([{
-        "종목": r['sym'],
+        "종목": display_name(r['sym']),
         "시세": f"${r['price']:.2f}  {r['chg']:+.1f}%",
         "상태": badge(r['status']),
     } for r in rows])
@@ -287,15 +291,16 @@ def render_stock_table(rows, key, context=None):
                          on_select="rerun", selection_mode="single-row", key=f"tbl_{key}")
     sel = event.selection.rows
     if sel:
-        picked = table.iloc[sel[0]]["종목"]
+        # rows 원본에서 ticker 추출 (table의 종목 컬럼은 한국어로 바뀌었으니)
+        picked_sym = rows[sel[0]]['sym']
         st.divider()
-        st.markdown(f"### 🔎 {picked} 자세히 보기")
+        st.markdown(f"### 🔎 {display_name(picked_sym)} 자세히 보기")
         try:
-            ddf = cached_bars(picked)
+            ddf = cached_bars(picked_sym)
             if ddf is None or len(ddf) < 30:
                 st.error("데이터를 받지 못했어요.")
             else:
-                show_detail(picked, ddf, context=context)
+                show_detail(picked_sym, ddf, context=context)
         except Exception as e:
             st.error(f"오류가 났어요: {e}")
 
@@ -326,6 +331,54 @@ def render_comparison(symbols, key, default_period="6개월"):
             f"**🚀 상위** {' · '.join(f'{s} ({v:.0f})' for s, v in top)}  　"
             f"**🐢 하위** {' · '.join(f'{s} ({v:.0f})' for s, v in bot)}"
         )
+
+
+def render_peer_summary(symbol, context):
+    """현재 종목이 같은 섹터/테마 동료 중 어디쯤인지 한 줄 요약."""
+    if not context:
+        return
+    peers, pname = None, None
+    # 섹터 직접 매칭
+    if context in SECTORS:
+        peers, pname = SECTORS[context], context
+    elif " · " in context:
+        # "테마명 · 단계명" 형태
+        tname, _, seg_name = context.partition(" · ")
+        if tname in THEMES:
+            for seg in THEMES[tname]["chain"]:
+                if seg["name"] == seg_name:
+                    peers, pname = seg["stocks"], context
+                    break
+            if not peers:
+                peers = sorted({s for seg in THEMES[tname]["chain"] for s in seg["stocks"]})
+                pname = tname
+    if not peers or symbol not in peers or len(peers) < 3:
+        return
+
+    days = 63  # 약 3개월
+    rets = {}
+    for s in peers:
+        df = cached_bars(s)
+        if df is None or len(df) < 5:
+            continue
+        c = df['close'].tail(days + 1).dropna()
+        if len(c) < 2:
+            continue
+        rets[s] = (c.iloc[-1] / c.iloc[0] - 1) * 100
+    if symbol not in rets or len(rets) < 3:
+        return
+
+    ranked = sorted(rets.items(), key=lambda x: -x[1])
+    rank = next(i for i, (s, _) in enumerate(ranked, 1) if s == symbol)
+    avg = sum(rets.values()) / len(rets)
+    my = rets[symbol]
+    rel = my - avg
+
+    arrow = "🟢 평균보다 강함" if rel > 1 else ("🔴 평균보다 약함" if rel < -1 else "⚪ 평균 수준")
+    st.markdown(
+        f"📍 **'{pname}'** 내 **{rank}/{len(rets)}위**  ·  "
+        f"3개월 **{my:+.1f}%** (그룹 평균 {avg:+.1f}%, {arrow})"
+    )
 
 
 def render_theme_detail(tname):
@@ -363,23 +416,32 @@ tab1, tab2, tab3, tab4 = st.tabs(
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
 with tab1:
-    query = st.text_input(
-        "회사명 또는 티커",
-        placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
-        key="search_query",
-    ).strip()
+    st.session_state.setdefault("search_query_text", "")
 
+    with st.form("ticker_search_form", clear_on_submit=False):
+        typed = st.text_input(
+            "회사명(한국어/영문) 또는 티커",
+            value=st.session_state.get("search_query_text", ""),
+            placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
+            key="search_typed",
+        )
+        submitted = st.form_submit_button("🔍 검색", use_container_width=True, type="primary")
+
+    if submitted:
+        st.session_state.search_query_text = (typed or "").strip()
+        # 정확한 티커면 즉시 분석
+        qu_now = st.session_state.search_query_text.upper()
+        if qu_now in TICKER_NAMES:
+            st.session_state.search_symbol = qu_now
+
+    query = st.session_state.get("search_query_text", "")
     qu = query.upper()
-    # 정확한 티커 직타 → 바로 검색 가능
-    if query and qu in TICKER_NAMES:
-        if st.button(f"🔎 {display_name(qu)} 분석하기",
-                     use_container_width=True, type="primary", key="search_btn_exact"):
-            st.session_state.search_symbol = qu
-    # 그 외 입력 → 매칭 후보를 pills로
-    elif query:
+
+    # 검색 결과 후보 표시 (정확 티커가 아닌 경우)
+    if query and qu not in TICKER_NAMES:
         candidates = search_tickers(query, limit=8)
         if candidates:
-            st.caption(f"'{query}' 와 비슷한 종목 — 골라주세요")
+            st.caption(f"'{query}' 와 비슷한 종목 — 톡 누르면 분석돼요")
             labels = [f"{name.split()[0]} ({tk})" for tk, name in candidates]
             picked = st.pills("후보 종목", labels, selection_mode="single",
                               label_visibility="collapsed", key="search_pick")
