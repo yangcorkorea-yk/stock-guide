@@ -20,6 +20,7 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       reference_levels)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
+from ticker_names import search_tickers, display_name, TICKER_NAMES
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 st.session_state.setdefault("sector_rows", None)
@@ -303,14 +304,35 @@ tab1, tab2, tab3, tab4 = st.tabs(
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
 with tab1:
-    symbol = st.text_input("종목 티커 (예: AAPL, TSLA, NVDA)", "AAPL").strip().upper()
-    if st.button("분석하기", use_container_width=True, type="primary", key="search_btn"):
-        st.session_state.search_symbol = symbol if symbol else None
-        if not symbol:
-            st.warning("티커를 입력해 주세요.")
+    query = st.text_input(
+        "회사명 또는 티커",
+        placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
+        key="search_query",
+    ).strip()
+
+    qu = query.upper()
+    # 정확한 티커 직타 → 바로 검색 가능
+    if query and qu in TICKER_NAMES:
+        if st.button(f"🔎 {display_name(qu)} 분석하기",
+                     use_container_width=True, type="primary", key="search_btn_exact"):
+            st.session_state.search_symbol = qu
+    # 그 외 입력 → 매칭 후보를 pills로
+    elif query:
+        candidates = search_tickers(query, limit=8)
+        if candidates:
+            st.caption(f"'{query}' 와 비슷한 종목 — 골라주세요")
+            labels = [f"{name.split()[0]} ({tk})" for tk, name in candidates]
+            picked = st.pills("후보 종목", labels, selection_mode="single",
+                              label_visibility="collapsed", key="search_pick")
+            if picked:
+                idx = labels.index(picked)
+                st.session_state.search_symbol = candidates[idx][0]
+        else:
+            st.info(f"'{query}' 와 비슷한 종목을 못 찾았어요. 회사명(한국어/영문) 또는 티커로 다시 시도해 주세요.")
 
     if st.session_state.search_symbol:
         sym = st.session_state.search_symbol
+        st.caption(f"분석 중인 종목: **{display_name(sym)}**")
         with st.spinner(f"{sym} 분석 중..."):
             try:
                 df = cached_bars(sym)
