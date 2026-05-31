@@ -227,6 +227,62 @@ def reference_levels(df):
     }
 
 
+def make_comparison_chart(symbols_to_df: dict, lookback_days: int = 126):
+    """
+    여러 종목의 종가를 '시작점=100' 으로 정규화해 한 차트에 겹쳐 보여줌.
+
+    symbols_to_df: {ticker: DataFrame}  (DataFrame은 'close' 컬럼 + DatetimeIndex)
+    lookback_days: 최근 N 거래일만 표시 (1개월=21, 3개월=63, 6개월=126, 1년=252)
+
+    데이터가 부족한(워밍업 안 된) 종목은 자동 제외.
+    """
+    fig = go.Figure()
+    rendered = 0
+    final_vals = []  # (sym, last_value) 정렬용
+
+    for sym, df in symbols_to_df.items():
+        if df is None or df.empty or 'close' not in df.columns:
+            continue
+        s = df['close'].tail(lookback_days).dropna()
+        if len(s) < 5:
+            continue
+        base = float(s.iloc[0])
+        if base == 0 or base != base:
+            continue
+        norm = s / base * 100
+        last = float(norm.iloc[-1])
+        final_vals.append((sym, last))
+        fig.add_trace(go.Scatter(
+            x=norm.index, y=norm.values, name=sym, mode='lines',
+            hovertemplate=f"<b>{sym}</b><br>%{{x|%Y-%m-%d}}<br>%{{y:.1f}} (시작 100)<extra></extra>",
+        ))
+        rendered += 1
+
+    fig.add_hline(y=100, line=dict(color="gray", dash="dot", width=1),
+                  annotation_text="시작점", annotation_position="right")
+    fig.update_layout(
+        height=460, margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
+                    font=dict(size=11)),
+        yaxis_title="시작=100 기준 변화",
+        hovermode="x unified",
+    )
+    # 일봉용 휴장일 제거 (분 단위 합치진 않음)
+    if rendered:
+        # 데이터프레임 중 첫 번째에서 인덱스 가져와 rangebreaks 적용
+        sample_idx = next(iter(symbols_to_df.values())).tail(lookback_days).index
+        try:
+            breaks = [dict(bounds=["sat", "mon"])]
+            bdays = pd.bdate_range(sample_idx.min(), sample_idx.max())
+            holidays = bdays.difference(sample_idx.normalize())
+            if len(holidays):
+                breaks.append(dict(values=list(holidays)))
+            fig.update_xaxes(rangebreaks=breaks)
+        except Exception:
+            pass
+    return fig, sorted(final_vals, key=lambda x: -x[1])
+
+
 def resample_bars(df, tf):
     """일봉 df를 주봉('W')/월봉('M')으로 합침. 그 외는 일봉 그대로."""
     if tf not in ("W", "M"):
@@ -487,9 +543,17 @@ def _humanize_cap(v):
 
 
 def company_brief(symbol):
-    """회사 기본정보 + 최근 뉴스 2건. 못 가져오면 빈 값으로 graceful."""
-    out = {"name": symbol, "sector": None, "industry": None,
-           "cap": None, "pe": None, "news": []}
+    """회사 기본정보 + 펀더멘털 + 최근 뉴스. 못 가져온 항목은 None으로 graceful."""
+    out = {
+        "name": symbol, "sector": None, "industry": None,
+        "cap": None, "pe": None,
+        # 펀더멘털
+        "pe_fwd": None, "psr": None, "pbr": None,
+        "div_yield": None, "op_margin": None, "profit_margin": None,
+        "rev_growth": None, "earnings_growth": None,
+        "roe": None, "beta": None,
+        "news": [],
+    }
     try:
         import yfinance as yf
         tk = yf.Ticker(symbol)
@@ -502,8 +566,38 @@ def company_brief(symbol):
         out["sector"] = _SECTOR_KO.get(sec, sec)
         out["industry"] = info.get("industry")
         out["cap"] = _humanize_cap(info.get("marketCap"))
-        pe = info.get("trailingPE")
-        out["pe"] = f"{pe:.1f}배" if isinstance(pe, (int, float)) else None
+
+        def _ratio(v, suffix="배"):
+            return f"{v:.1f}{suffix}" if isinstance(v, (int, float)) else None
+
+        def _pct(v, signed=False):
+            if not isinstance(v, (int, float)):
+                return None
+            fmt = f"{v*100:+.1f}%" if signed else f"{v*100:.1f}%"
+            return fmt
+
+        out["pe"] = _ratio(info.get("trailingPE"))
+        out["pe_fwd"] = _ratio(info.get("forwardPE"))
+        out["psr"] = _ratio(info.get("priceToSalesTrailing12Months"))
+        out["pbr"] = _ratio(info.get("priceToBook"))
+
+        # 배당수익률: yfinance 최근 버전은 percent(2.5=2.5%), 옛 버전은 decimal(0.025).
+        dy = info.get("dividendYield")
+        if isinstance(dy, (int, float)) and dy > 0:
+            pct = dy if dy > 1 else dy * 100
+            out["div_yield"] = f"{pct:.2f}%"
+        elif isinstance(dy, (int, float)):
+            out["div_yield"] = "0%"
+
+        out["op_margin"] = _pct(info.get("operatingMargins"))
+        out["profit_margin"] = _pct(info.get("profitMargins"))
+        out["rev_growth"] = _pct(info.get("revenueGrowth"), signed=True)
+        out["earnings_growth"] = _pct(info.get("earningsGrowth"), signed=True)
+        out["roe"] = _pct(info.get("returnOnEquity"))
+        beta = info.get("beta")
+        if isinstance(beta, (int, float)):
+            out["beta"] = f"{beta:.2f}"
+
         try:
             raw = tk.news or []
         except Exception:
@@ -519,3 +613,21 @@ def company_brief(symbol):
     except Exception:
         pass
     return out
+
+
+FUNDAMENTALS_HELP = """\
+**PER (주가수익비율)** : 주가 ÷ 1주당 순이익. 작을수록 '버는 돈 대비 주가가 싸 보임'.
+같은 업종끼리만 비교가 의미 있어요. 적자 회사는 표시 안 됨.
+
+**PSR (주가매출비율)** : 주가 ÷ 1주당 매출. 적자 회사·성장주 평가에 유용.
+
+**배당수익률** : 1년 배당금 ÷ 주가. 0%면 배당 없는 회사예요.
+
+**영업이익률** : 매출 100원 중 본업으로 남긴 이익이 몇 원인지. 클수록 본업 잘 버는 회사.
+
+**매출 성장(YoY)** : 작년 같은 분기 대비 매출이 얼마나 늘었나. 성장주일수록 큼.
+
+**ROE (자기자본수익률)** : 자기 돈으로 얼마나 효율적으로 이익을 냈나. 15%↑면 보통 우량으로 봄.
+
+⚠️ 위 숫자들은 한 시점의 스냅샷이에요. 한 줄 비교보단 **추세**와 **업종 동료**랑의 비교가 더 중요해요.
+"""

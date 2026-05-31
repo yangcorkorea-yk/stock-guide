@@ -17,9 +17,10 @@ import pandas as pd
 import streamlit as st
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
-                      reference_levels)
+                      reference_levels, FUNDAMENTALS_HELP, make_comparison_chart)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
+from ticker_names import search_tickers, display_name, TICKER_NAMES
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 st.session_state.setdefault("sector_rows", None)
@@ -134,11 +135,37 @@ def show_detail(symbol, df, context=None):
         bits.append(f"**업종** {s}")
     if brief["cap"]:
         bits.append(f"**시총** {brief['cap']}")
-    if brief["pe"]:
-        bits.append(f"**PER** {brief['pe']}")
+    if brief.get("beta"):
+        bits.append(f"**베타** {brief['beta']}")
     bits.append(f"**52주 고점 대비** {info['high_52w_pct']:+.0f}%")
     st.write("　·　".join(bits))
-    st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요.")
+    st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요. "
+               "베타는 시장(1.0)보다 얼마나 더/덜 출렁이는지예요.")
+
+    # 💎 펀더멘털 (재무 건강)
+    fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
+    if any(brief.get(k) for k in fund_fields):
+        st.subheader("💎 재무 건강")
+        st.caption("회사의 '몸값'과 '돈 잘 버는 정도'. **같은 업종끼리만** 비교해야 의미 있어요.")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("PER (수익 대비)", brief.get("pe") or "—",
+                  help="주가 ÷ 1주당 순이익. 적자면 표시 안 됨.")
+        c2.metric("PSR (매출 대비)", brief.get("psr") or "—",
+                  help="주가 ÷ 1주당 매출. 적자 회사·성장주에 유용.")
+        c3.metric("배당수익률", brief.get("div_yield") or "—",
+                  help="연 배당금 ÷ 주가.")
+
+        c4, c5, c6 = st.columns(3)
+        c4.metric("영업이익률", brief.get("op_margin") or "—",
+                  help="매출 100원 중 본업으로 남긴 이익.")
+        c5.metric("매출 성장(YoY)", brief.get("rev_growth") or "—",
+                  help="작년 같은 분기 대비 매출 증감.")
+        c6.metric("ROE", brief.get("roe") or "—",
+                  help="자기자본으로 얼마나 효율적으로 이익을 냈는지. 15%↑면 우량.")
+
+        with st.expander("❓ 펀더멘털 용어 한 줄 설명"):
+            st.markdown(FUNDAMENTALS_HELP)
 
     st.subheader("💡 왜 이 종목?")
     why = []
@@ -273,6 +300,34 @@ def render_stock_table(rows, key, context=None):
             st.error(f"오류가 났어요: {e}")
 
 
+def render_comparison(symbols, key, default_period="6개월"):
+    """주어진 심볼들의 수익률 비교 차트 + 기간 pills + 순위 요약."""
+    periods = {"1개월": 21, "3개월": 63, "6개월": 126, "1년": 252}
+    period = st.pills("기간", list(periods.keys()), default=default_period,
+                      selection_mode="single", label_visibility="collapsed",
+                      key=f"cmp_p_{key}") or default_period
+    days = periods[period]
+
+    with st.spinner(f"{len(symbols)}개 종목 시세 모으는 중..."):
+        dfs = {s: cached_bars(s) for s in symbols}
+    if not any(v is not None and not v.empty for v in dfs.values()):
+        st.warning("시세 데이터를 받지 못했어요.")
+        return
+
+    fig, ranking = make_comparison_chart(dfs, lookback_days=days)
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("※ 모든 종목을 시작점=100으로 맞춰 겹친 거예요. "
+               "선이 위로 갈수록 그 기간 더 올랐다는 뜻이에요.")
+
+    if ranking:
+        top = ranking[:3]
+        bot = ranking[-3:][::-1]
+        st.markdown(
+            f"**🚀 상위** {' · '.join(f'{s} ({v:.0f})' for s, v in top)}  　"
+            f"**🐢 하위** {' · '.join(f'{s} ({v:.0f})' for s, v in bot)}"
+        )
+
+
 def render_theme_detail(tname):
     """선택한 테마의 설명·체인·단계별 종목 표 렌더링 (탭 3·4 공용)."""
     tinfo = THEMES[tname]
@@ -281,6 +336,11 @@ def render_theme_detail(tname):
     st.markdown(f"#### {tname}")
     st.write(tinfo["desc"])
     st.info("💡 파생 섹터 흐름:  " + "  →  ".join(seg_names))
+
+    # 📊 테마 전체 종목 수익률 비교
+    all_stocks = sorted({s for seg in tinfo["chain"] for s in seg["stocks"]})
+    with st.expander(f"📊 테마 종목 수익률 비교 ({len(all_stocks)}개 겹쳐 보기)"):
+        render_comparison(all_stocks, key=f"theme_{tname}")
 
     st.caption("👇 흐름의 단계를 누르면 그 단계의 종목이 나와요")
     pick_seg = st.pills("단계 선택", seg_names, selection_mode="single",
@@ -303,14 +363,35 @@ tab1, tab2, tab3, tab4 = st.tabs(
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
 with tab1:
-    symbol = st.text_input("종목 티커 (예: AAPL, TSLA, NVDA)", "AAPL").strip().upper()
-    if st.button("분석하기", use_container_width=True, type="primary", key="search_btn"):
-        st.session_state.search_symbol = symbol if symbol else None
-        if not symbol:
-            st.warning("티커를 입력해 주세요.")
+    query = st.text_input(
+        "회사명 또는 티커",
+        placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
+        key="search_query",
+    ).strip()
+
+    qu = query.upper()
+    # 정확한 티커 직타 → 바로 검색 가능
+    if query and qu in TICKER_NAMES:
+        if st.button(f"🔎 {display_name(qu)} 분석하기",
+                     use_container_width=True, type="primary", key="search_btn_exact"):
+            st.session_state.search_symbol = qu
+    # 그 외 입력 → 매칭 후보를 pills로
+    elif query:
+        candidates = search_tickers(query, limit=8)
+        if candidates:
+            st.caption(f"'{query}' 와 비슷한 종목 — 골라주세요")
+            labels = [f"{name.split()[0]} ({tk})" for tk, name in candidates]
+            picked = st.pills("후보 종목", labels, selection_mode="single",
+                              label_visibility="collapsed", key="search_pick")
+            if picked:
+                idx = labels.index(picked)
+                st.session_state.search_symbol = candidates[idx][0]
+        else:
+            st.info(f"'{query}' 와 비슷한 종목을 못 찾았어요. 회사명(한국어/영문) 또는 티커로 다시 시도해 주세요.")
 
     if st.session_state.search_symbol:
         sym = st.session_state.search_symbol
+        st.caption(f"분석 중인 종목: **{display_name(sym)}**")
         with st.spinner(f"{sym} 분석 중..."):
             try:
                 df = cached_bars(sym)
@@ -339,6 +420,8 @@ with tab2:
         name = st.session_state.sector_name
         st.write(f"**{name}** 대표 종목 현재 상태")
         render_stock_table(st.session_state.sector_rows, f"sector_{name}", context=name)
+        with st.expander(f"📊 섹터 종목 수익률 비교 ({len(SECTORS[name])}개 겹쳐 보기)"):
+            render_comparison(SECTORS[name], key=f"sector_{name}")
 
 # ── 탭 3: 테마 탐색 ──────────────────────────────
 with tab3:
