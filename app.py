@@ -10,6 +10,9 @@
 실행:  python -m streamlit run app.py
 """
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
@@ -19,6 +22,17 @@ st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="cent
 st.session_state.setdefault("sector_rows", None)
 st.session_state.setdefault("theme_name", None)
 st.session_state.setdefault("search_symbol", None)
+
+HOT_THEMES_PATH = Path(__file__).resolve().parent / "data" / "hot_themes.json"
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_hot_themes():
+    """data/hot_themes.json 을 읽어옴. 파일 없거나 파싱 실패 시 None."""
+    try:
+        return json.loads(HOT_THEMES_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -158,10 +172,33 @@ def render_stock_table(rows, key, context=None):
             st.error(f"오류가 났어요: {e}")
 
 
+def render_theme_detail(tname):
+    """선택한 테마의 설명·체인·단계별 종목 표 렌더링 (탭 3·4 공용)."""
+    tinfo = THEMES[tname]
+    seg_names = [s["name"] for s in tinfo["chain"]]
+
+    st.markdown(f"#### {tname}")
+    st.write(tinfo["desc"])
+    st.info("💡 파생 섹터 흐름:  " + "  →  ".join(seg_names))
+
+    st.caption("👇 흐름의 단계를 누르면 그 단계의 종목이 나와요")
+    pick_seg = st.pills("단계 선택", seg_names, selection_mode="single",
+                        default=seg_names[0], label_visibility="collapsed",
+                        key=f"seg_{tname}")
+    if pick_seg:
+        seg = next(s for s in tinfo["chain"] if s["name"] == pick_seg)
+        st.write(f"**{pick_seg}** 단계 종목")
+        rows = analyze_tickers(seg["stocks"])
+        render_stock_table(rows, f"theme_{tname}_{pick_seg}",
+                           context=f"{tname} · {pick_seg}")
+
+
 st.title("📈 종목 길잡이")
 st.caption("미국주식 초보자를 위한 '지금 이 종목, 어떤 상태?' 도구")
 
-tab1, tab2, tab3 = st.tabs(["🔍 종목 검색", "📂 섹터 탐색", "🔥 테마 탐색"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["🔍 종목 검색", "📂 섹터 탐색", "📂 테마 탐색", "🔥 뜨는 테마"]
+)
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
 with tab1:
@@ -205,23 +242,47 @@ with tab3:
         st.session_state.theme_name = theme
 
     if st.session_state.theme_name:
-        tname = st.session_state.theme_name
-        tinfo = THEMES[tname]
-        seg_names = [s["name"] for s in tinfo["chain"]]
+        render_theme_detail(st.session_state.theme_name)
 
-        st.markdown(f"#### {tname}")
-        st.write(tinfo["desc"])
-        st.info("💡 파생 섹터 흐름:  " + "  →  ".join(seg_names))
+# ── 탭 4: 뜨는 테마 ──────────────────────────────
+with tab4:
+    st.write("최근 **뉴스에 가장 많이 언급된 테마**를 순위로 보여줘요.")
+    st.caption("※ 언급량은 '관심도'의 한 단서일 뿐, 오른다는 예측이 아닙니다. "
+               "(키워드 매칭 기반 — 같은 단어를 다른 맥락으로 쓴 기사도 섞일 수 있어요)")
 
-        st.caption("👇 흐름의 단계를 누르면 그 단계의 종목이 나와요")
-        pick_seg = st.pills("단계 선택", seg_names, selection_mode="single",
-                            default=seg_names[0], label_visibility="collapsed",
-                            key=f"seg_{tname}")
-        if pick_seg:
-            seg = next(s for s in tinfo["chain"] if s["name"] == pick_seg)
-            st.write(f"**{pick_seg}** 단계 종목")
-            rows = analyze_tickers(seg["stocks"])
-            render_stock_table(rows, f"theme_{tname}_{pick_seg}", context=f"{tname} · {pick_seg}")
+    hot = load_hot_themes()
+    if not hot or not hot.get("themes"):
+        st.info("아직 집계 전이에요. "
+                "(GitHub Actions가 매일 자동으로 `data/hot_themes.json` 을 갱신해요.)")
+    else:
+        st.caption(
+            f"기준: 최근 {hot.get('window_days', 3)}일 · "
+            f"표본 {hot.get('sample_size', '?')}건 · "
+            f"갱신 {hot.get('updated_at', '?')}"
+        )
+
+        rows = [
+            {"순위": i, "테마": t["name"], "언급": t["count"],
+             "한줄 설명": (t.get("desc") or "").split(".")[0][:60]}
+            for i, t in enumerate(hot["themes"], 1) if t["count"] > 0
+        ]
+        if not rows:
+            st.info("아직 매칭된 뉴스가 없어요. 내일 다시 확인해 주세요.")
+        else:
+            table = pd.DataFrame(rows)
+            st.caption("👇 테마를 선택하면 아래에 상세가 펼쳐져요")
+            event = st.dataframe(
+                table, hide_index=True, use_container_width=True,
+                on_select="rerun", selection_mode="single-row", key="tbl_hot",
+            )
+            sel = event.selection.rows
+            if sel:
+                picked = table.iloc[sel[0]]["테마"]
+                st.divider()
+                if picked in THEMES:
+                    render_theme_detail(picked)
+                else:
+                    st.error("이 테마가 현재 카탈로그에 없어요 (데이터가 더 오래되었을 수 있어요).")
 
 st.divider()
 st.caption("⚠️ 이 앱은 투자조언이 아니며 정보·교육 목적입니다. "

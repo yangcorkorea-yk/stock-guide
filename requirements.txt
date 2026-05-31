@@ -4,3 +4,5 @@ alpaca-py
 pandas
 numpy
 yfinance
+requests
+anthropic
