@@ -11,10 +11,18 @@
 """
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+# 티커 형식: 영문 대문자 1~5자 (+ ".A" 같은 클래스 접미사 선택)
+_TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
+
+
+def _looks_like_ticker(s: str) -> bool:
+    return bool(s and _TICKER_RE.match(s.upper()))
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart)
@@ -186,23 +194,29 @@ def show_detail(symbol, df, context=None):
     # 📰 최근 뉴스 (Alpaca News + LLM 한국어 요약 + 원문 링크)
     st.subheader("📰 최근 뉴스")
     news_items = cached_news(symbol)
-    if not news_items:
-        # 폴백: yfinance 헤드라인 (요약/링크 없음)
-        if brief["news"]:
-            for t in brief["news"]:
-                st.markdown(f"- {t}")
-            st.caption("※ Alpaca 뉴스 응답이 없어 회사정보 기반으로 표시 중이에요.")
-        else:
-            st.caption("최근 뉴스를 불러오지 못했어요.")
-    else:
-        headlines = tuple(n.get("headline") or "" for n in news_items if n.get("headline"))
-        summary = cached_news_summary(symbol, brief.get("sector"), headlines) if headlines else None
+    headlines = tuple(
+        (n.get("headline") or "").strip()
+        for n in news_items if n.get("headline")
+    )
+    # 폴백 헤드라인: Alpaca가 0건이면 yfinance 헤드라인 활용
+    fallback_used = False
+    if not headlines and brief.get("news"):
+        headlines = tuple(brief["news"])
+        fallback_used = True
+
+    if headlines:
+        summary = cached_news_summary(symbol, brief.get("sector"), headlines)
         if summary:
             st.markdown(summary)
-            st.caption("⚠️ AI가 헤드라인만 보고 요약한 거예요. 정확한 내용은 원문을 확인해 주세요.")
-        elif headlines:
-            st.caption("(AI 요약 미사용 — 키가 없거나 호출 실패. 원문 링크만 표시해요.)")
+            tail = "회사정보 헤드라인" if fallback_used else "Alpaca 뉴스 헤드라인"
+            st.caption(f"⚠️ AI가 {tail}만 보고 요약한 거예요. 정확한 내용은 원문을 확인해 주세요.")
+        else:
+            st.caption("(AI 요약 미사용 — `ANTHROPIC_API_KEY` 가 없거나 호출 실패. 헤드라인만 표시해요.)")
+    elif not news_items:
+        st.caption("최근 뉴스를 불러오지 못했어요.")
 
+    # 원문 링크 (Alpaca 뉴스에만 URL 있음)
+    if news_items:
         st.markdown("**🔗 원문 링크**")
         for n in news_items[:6]:
             title = (n.get("headline") or "").strip()
@@ -214,6 +228,10 @@ def show_detail(symbol, df, context=None):
                 st.markdown(f"- [{title}]({url})  _·  {src}_")
             else:
                 st.markdown(f"- {title}  _·  {src}_")
+    elif fallback_used:
+        st.markdown("**🔗 헤드라인**  _(yfinance 폴백 — 원문 URL 없음)_")
+        for t in headlines:
+            st.markdown(f"- {t}")
 
     st.subheader("📊 현재 기술적 상태")
     st.caption("아래 수치는 일봉 기준 현재 상태예요 (차트 기간과 무관).")
@@ -428,16 +446,22 @@ with tab1:
         submitted = st.form_submit_button("🔍 검색", use_container_width=True, type="primary")
 
     if submitted:
-        st.session_state.search_query_text = (typed or "").strip()
-        # 정확한 티커면 즉시 분석
-        qu_now = st.session_state.search_query_text.upper()
-        if qu_now in TICKER_NAMES:
+        s = (typed or "").strip()
+        st.session_state.search_query_text = s
+        qu_now = s.upper()
+        # 검색 동작:
+        #  ① 카탈로그 정확 티커(NVDA 등) → 즉시 분석
+        #  ② 카탈로그에 매칭 후보 있으면 → 사용자 선택용 후보 표시 (아래에서)
+        #  ③ 후보 0개 + 티커처럼 생긴 입력(FIG 등) → 카탈로그 외라도 그대로 시도
+        if qu_now and qu_now in TICKER_NAMES:
+            st.session_state.search_symbol = qu_now
+        elif s and _looks_like_ticker(qu_now) and not search_tickers(s, limit=1):
             st.session_state.search_symbol = qu_now
 
     query = st.session_state.get("search_query_text", "")
     qu = query.upper()
 
-    # 검색 결과 후보 표시 (정확 티커가 아닌 경우)
+    # 후보 표시: 카탈로그에 부분 매칭이 있는 경우 (예: '엔비', 'apple')
     if query and qu not in TICKER_NAMES:
         candidates = search_tickers(query, limit=8)
         if candidates:
@@ -448,7 +472,7 @@ with tab1:
             if picked:
                 idx = labels.index(picked)
                 st.session_state.search_symbol = candidates[idx][0]
-        else:
+        elif not _looks_like_ticker(qu):
             st.info(f"'{query}' 와 비슷한 종목을 못 찾았어요. 회사명(한국어/영문) 또는 티커로 다시 시도해 주세요.")
 
     if st.session_state.search_symbol:
