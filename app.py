@@ -324,11 +324,17 @@ with tab1:
 # ── 탭 2: 섹터 탐색 ──────────────────────────────
 with tab2:
     st.write("관심 있는 **섹터**를 고르면, 그 안 대표 종목들의 현재 상태가 한눈에 보여요.")
-    sector = st.selectbox("섹터 선택", list(SECTORS.keys()), key="sector_sel")
+    st.caption("👇 섹터를 톡 누르면 선택돼요 (키보드 안 뜨게 버튼식이에요)")
+    sector = st.pills("섹터 선택", list(SECTORS.keys()), selection_mode="single",
+                      default=list(SECTORS.keys())[0], label_visibility="collapsed",
+                      key="sector_sel")
     if st.button("이 섹터 종목 보기", use_container_width=True, type="primary", key="sector_btn"):
-        with st.spinner(f"{sector} 종목들 분석 중..."):
-            st.session_state.sector_rows = analyze_tickers(SECTORS[sector])
-            st.session_state.sector_name = sector
+        if not sector:
+            st.warning("먼저 섹터를 선택해 주세요.")
+        else:
+            with st.spinner(f"{sector} 종목들 분석 중..."):
+                st.session_state.sector_rows = analyze_tickers(SECTORS[sector])
+                st.session_state.sector_name = sector
     if st.session_state.sector_rows is not None:
         name = st.session_state.sector_name
         st.write(f"**{name}** 대표 종목 현재 상태")
@@ -338,9 +344,15 @@ with tab2:
 with tab3:
     st.write("지금 시장이 주목하는 **테마**들이에요. 고르면 흐름(단계)과 그 단계의 종목을 볼 수 있어요.")
     st.caption("※ '지금 주목받는 흐름'을 정리한 것이지, 오른다는 예측이 아닙니다.")
-    theme = st.selectbox("테마 선택", list(THEMES.keys()), key="theme_sel")
+    st.caption("👇 테마를 톡 누르면 선택돼요 (키보드 안 뜨게 버튼식이에요)")
+    theme = st.pills("테마 선택", list(THEMES.keys()), selection_mode="single",
+                     default=list(THEMES.keys())[0], label_visibility="collapsed",
+                     key="theme_sel")
     if st.button("이 테마 살펴보기", use_container_width=True, type="primary", key="theme_btn"):
-        st.session_state.theme_name = theme
+        if not theme:
+            st.warning("먼저 테마를 선택해 주세요.")
+        else:
+            st.session_state.theme_name = theme
 
     if st.session_state.theme_name:
         render_theme_detail(st.session_state.theme_name)
