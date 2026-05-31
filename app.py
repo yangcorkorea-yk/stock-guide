@@ -16,7 +16,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
-                      RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief)
+                      RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
+                      reference_levels)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 
@@ -107,7 +108,22 @@ def show_detail(symbol, df, context=None):
         long_df = cached_bars_long(symbol)
         chart_df = resample_bars(long_df, "W" if tf == "주봉" else "M")
     st.caption(f"{tf} · 위: 가격(캔들) + 볼린저밴드  /  아래: RSI · 빨강=상승, 파랑=하락")
-    st.plotly_chart(make_chart(chart_df), use_container_width=True)
+
+    # 일봉일 때만 참고 가격대(진입/매도/손절) 수평선 표시
+    fig = make_chart(chart_df)
+    levels = None
+    if tf == "일봉":
+        try:
+            levels = reference_levels(df)
+            fig.add_hline(y=levels['entry'][0]['price'], line=dict(color="#1c7ed6", dash="dot", width=1),
+                          row=1, col=1, annotation_text="진입 참고", annotation_position="left")
+            fig.add_hline(y=levels['exit'][0]['price'], line=dict(color="#e03131", dash="dot", width=1),
+                          row=1, col=1, annotation_text="매도 참고", annotation_position="left")
+            fig.add_hline(y=levels['stop'][0]['price'], line=dict(color="#868e96", dash="dash", width=1),
+                          row=1, col=1, annotation_text="손절 참고", annotation_position="left")
+        except Exception:
+            levels = None
+    st.plotly_chart(fig, use_container_width=True)
 
     brief = cached_brief(symbol)
 
@@ -179,6 +195,47 @@ def show_detail(symbol, df, context=None):
         st.caption("※ 거래량은 무료 IEX 피드 기준이라 실제 전체 거래량보다 작게 표시돼요 (절대값보다 '평소 대비' 상대 비교용).")
     st.write(f"- **추세**: {info['trend']}")
     st.caption(f"기준일: {info['date']}")
+
+    # 📍 참고 가격대 (규칙 기반 — 예측·추천 아님)
+    if levels is None:
+        # 사용자가 주봉/월봉 차트를 본 경우에도 참고값은 일봉 기준으로 계산
+        try:
+            levels = reference_levels(df)
+        except Exception:
+            levels = None
+    if levels is not None:
+        st.subheader("📍 참고 가격대  _(규칙 계산값 · 예측 아님)_")
+        st.caption(
+            "아래는 **사용자가 직접 판단할 때 참고하라고** 규칙으로 계산한 가격대예요. "
+            "예측·매수/매도 권유 아닙니다."
+        )
+        with st.expander("⚠️ 한계 — 이런 기계적 규칙의 진실"):
+            st.markdown(
+                "- 이런 진입/매도/손절 규칙들은 **과거 백테스트에서 단순 보유를 못 이긴 경우가 많아요**.\n"
+                "- '평소 다니던 길'을 가정한 규칙이라, 큰 뉴스/사건엔 쉽게 깨져요.\n"
+                "- 그래도 '지금 어디쯤이지?'를 가늠하는 **눈금자** 정도로는 쓸모 있어요."
+            )
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**🔵 진입 참고**")
+            for it in levels['entry']:
+                pct = (it['price'] / levels['close'] - 1) * 100
+                st.write(f"- ${it['price']:.2f}  _({pct:+.1f}%)_  · {it['label']}")
+                st.caption(it['rule'])
+        with c2:
+            st.markdown("**🔴 매도 참고**")
+            for it in levels['exit']:
+                pct = (it['price'] / levels['close'] - 1) * 100
+                st.write(f"- ${it['price']:.2f}  _({pct:+.1f}%)_  · {it['label']}")
+                st.caption(it['rule'])
+        with c3:
+            st.markdown("**⚫ 손절 라인**")
+            for it in levels['stop']:
+                pct = (it['price'] / levels['close'] - 1) * 100
+                st.write(f"- ${it['price']:.2f}  _({pct:+.1f}%)_  · {it['label']}")
+                st.caption(it['rule'])
+        st.caption(f"기준일 종가 ${levels['close']:.2f} · ATR(14) ${levels['atr14']:.2f}")
 
     st.subheader("🗣️ 쉬운 설명")
     st.markdown(explain(symbol, info))

@@ -169,6 +169,64 @@ def make_chart(df, lookback=60):
     return fig
 
 
+def reference_levels(df):
+    """
+    규칙 기반 진입/매도/손절 참고 가격대. **예측·추천이 아님 — 규칙으로 계산한 참고값**.
+
+    반환:
+      close: 현재가
+      atr14: 최근 14일 평균 진폭(ATR)
+      entry: [{label, price, rule}, ...]  # 진입 후보 가격대
+      exit:  [{label, price, rule}, ...]  # 매도 후보 가격대
+      stop:  [{label, price, rule}, ...]  # 손절 후보 라인
+    """
+    df2 = add_indicators(df).dropna()
+    last = df2.iloc[-1]
+    close = float(last['close'])
+    bb_lower = float(last['bb_lower'])
+    bb_upper = float(last['bb_upper'])
+    ma_long = float(last['ma_long'])
+
+    recent = df2.tail(20)
+    swing_low_20 = float(recent['low'].min())
+    swing_high_20 = float(recent['high'].max())
+    high_52 = float(df2['high'].tail(252).max())
+
+    # ATR(14): True Range 14일 평균
+    hl = df2['high'] - df2['low']
+    hc = (df2['high'] - df2['close'].shift()).abs()
+    lc = (df2['low'] - df2['close'].shift()).abs()
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    atr14 = float(tr.tail(14).mean())
+
+    return {
+        "close": close,
+        "atr14": atr14,
+        "entry": [
+            {"label": "볼린저 하단", "price": bb_lower,
+             "rule": "최근 20일 변동폭의 아래쪽 띠 — '평소보다 싸 보이는' 가격대"},
+            {"label": "최근 20일 저점", "price": swing_low_20,
+             "rule": "지지선으로 자주 거론되는 가격"},
+            {"label": "장기(20일) 이평선", "price": ma_long,
+             "rule": "추세를 가르는 평균선 — 위로 회복하면 추세 복귀로 해석"},
+        ],
+        "exit": [
+            {"label": "볼린저 상단", "price": bb_upper,
+             "rule": "최근 20일 변동폭의 위쪽 띠 — '평소보다 비싼' 가격대"},
+            {"label": "최근 20일 고점", "price": swing_high_20,
+             "rule": "저항선으로 자주 거론되는 가격"},
+            {"label": "52주 고점", "price": high_52,
+             "rule": "장기 강세 천장"},
+        ],
+        "stop": [
+            {"label": "최근 20일 저점 −3%", "price": swing_low_20 * 0.97,
+             "rule": "스윙 저점 살짝 아래 — 이 선을 깨면 흐름이 무너졌다고 봄"},
+            {"label": f"현재가 − ATR×2", "price": close - 2 * atr14,
+             "rule": f"평균 일일 진폭(${atr14:.2f})의 2배 만큼 아래"},
+        ],
+    }
+
+
 def resample_bars(df, tf):
     """일봉 df를 주봉('W')/월봉('M')으로 합침. 그 외는 일봉 그대로."""
     if tf not in ("W", "M"):
