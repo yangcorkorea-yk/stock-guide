@@ -17,6 +17,8 @@ import pandas as pd
 import streamlit as st
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief)
+from news_client import fetch_news
+from llm_client import summarize_news_ko
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 st.session_state.setdefault("sector_rows", None)
@@ -48,6 +50,22 @@ def cached_bars_long(symbol):
 @st.cache_data(ttl=3600, show_spinner=False)
 def cached_brief(symbol):
     return company_brief(symbol)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_news(symbol, days=5, limit=20):
+    """Alpaca 뉴스 호출 결과 캐시 (1시간). 실패 시 빈 리스트."""
+    from datetime import datetime, timedelta, timezone
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    return fetch_news(symbols=[symbol], start=start, end=end,
+                      limit=limit, max_pages=1)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_news_summary(symbol, sector, headlines_tuple):
+    """LLM 요약 캐시 (1시간). headlines를 튜플로 받아 캐시 키 안정화."""
+    return summarize_news_ko(symbol, sector, list(headlines_tuple))
 
 
 def badge(status):
@@ -115,14 +133,40 @@ def show_detail(symbol, df, context=None):
         why.append(line)
     elif brief["industry"]:
         why.append(f"- 🏷️ **업종**: {brief['industry']}")
-    if brief["news"]:
-        why.append("- 📰 **최근 뉴스**")
-        for t in brief["news"]:
-            why.append(f"    - {t}")
     if why:
         st.markdown("\n".join(why))
+
+    # 📰 최근 뉴스 (Alpaca News + LLM 한국어 요약 + 원문 링크)
+    st.subheader("📰 최근 뉴스")
+    news_items = cached_news(symbol)
+    if not news_items:
+        # 폴백: yfinance 헤드라인 (요약/링크 없음)
+        if brief["news"]:
+            for t in brief["news"]:
+                st.markdown(f"- {t}")
+            st.caption("※ Alpaca 뉴스 응답이 없어 회사정보 기반으로 표시 중이에요.")
+        else:
+            st.caption("최근 뉴스를 불러오지 못했어요.")
     else:
-        st.caption("연결 근거 정보를 불러오지 못했어요. (회사정보 일시 오류일 수 있어요)")
+        headlines = tuple(n.get("headline") or "" for n in news_items if n.get("headline"))
+        summary = cached_news_summary(symbol, brief.get("sector"), headlines) if headlines else None
+        if summary:
+            st.markdown(summary)
+            st.caption("⚠️ AI가 헤드라인만 보고 요약한 거예요. 정확한 내용은 원문을 확인해 주세요.")
+        elif headlines:
+            st.caption("(AI 요약 미사용 — 키가 없거나 호출 실패. 원문 링크만 표시해요.)")
+
+        st.markdown("**🔗 원문 링크**")
+        for n in news_items[:6]:
+            title = (n.get("headline") or "").strip()
+            url = n.get("url") or ""
+            src = n.get("source") or ""
+            if not title:
+                continue
+            if url:
+                st.markdown(f"- [{title}]({url})  _·  {src}_")
+            else:
+                st.markdown(f"- {title}  _·  {src}_")
 
     st.subheader("📊 현재 기술적 상태")
     st.caption("아래 수치는 일봉 기준 현재 상태예요 (차트 기간과 무관).")
