@@ -1,0 +1,45 @@
+name: Daily — Rank Hot Themes
+
+on:
+  schedule:
+    # 매일 13:30 UTC (대략 미국 동부 9:30 AM 장 개장 직후)
+    - cron: "30 13 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  rank:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: Run rank_themes
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: |
+          python scripts/rank_themes.py --days 3 --max-pages 10
+
+      - name: Commit JSON if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/hot_themes.json)" ]; then
+            git add data/hot_themes.json
+            git commit -m "chore(data): refresh hot_themes.json [skip ci]"
+            git push
+          else
+            echo "변경 없음 — 커밋 건너뜀."
+          fi
