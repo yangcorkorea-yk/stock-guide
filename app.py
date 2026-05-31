@@ -118,6 +118,7 @@ def show_detail(symbol, df, context=None):
         rv = info['rvol']
         tag = "평소보다 많음 🔥" if rv >= 1.5 else ("평소보다 적음 💤" if rv < 0.7 else "보통")
         st.write(f"- **거래량 (거래쏠림)**: 평균의 {rv:.1f}배 — {tag}")
+        st.caption("※ 거래량은 무료 IEX 피드 기준이라 실제 전체 거래량보다 작게 표시돼요 (절대값보다 '평소 대비' 상대 비교용).")
     st.write(f"- **추세**: {info['trend']}")
     st.caption(f"기준일: {info['date']}")
 
