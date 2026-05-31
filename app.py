@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
-                      reference_levels)
+                      reference_levels, FUNDAMENTALS_HELP)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
@@ -135,11 +135,37 @@ def show_detail(symbol, df, context=None):
         bits.append(f"**업종** {s}")
     if brief["cap"]:
         bits.append(f"**시총** {brief['cap']}")
-    if brief["pe"]:
-        bits.append(f"**PER** {brief['pe']}")
+    if brief.get("beta"):
+        bits.append(f"**베타** {brief['beta']}")
     bits.append(f"**52주 고점 대비** {info['high_52w_pct']:+.0f}%")
     st.write("　·　".join(bits))
-    st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요.")
+    st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요. "
+               "베타는 시장(1.0)보다 얼마나 더/덜 출렁이는지예요.")
+
+    # 💎 펀더멘털 (재무 건강)
+    fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
+    if any(brief.get(k) for k in fund_fields):
+        st.subheader("💎 재무 건강")
+        st.caption("회사의 '몸값'과 '돈 잘 버는 정도'. **같은 업종끼리만** 비교해야 의미 있어요.")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("PER (수익 대비)", brief.get("pe") or "—",
+                  help="주가 ÷ 1주당 순이익. 적자면 표시 안 됨.")
+        c2.metric("PSR (매출 대비)", brief.get("psr") or "—",
+                  help="주가 ÷ 1주당 매출. 적자 회사·성장주에 유용.")
+        c3.metric("배당수익률", brief.get("div_yield") or "—",
+                  help="연 배당금 ÷ 주가.")
+
+        c4, c5, c6 = st.columns(3)
+        c4.metric("영업이익률", brief.get("op_margin") or "—",
+                  help="매출 100원 중 본업으로 남긴 이익.")
+        c5.metric("매출 성장(YoY)", brief.get("rev_growth") or "—",
+                  help="작년 같은 분기 대비 매출 증감.")
+        c6.metric("ROE", brief.get("roe") or "—",
+                  help="자기자본으로 얼마나 효율적으로 이익을 냈는지. 15%↑면 우량.")
+
+        with st.expander("❓ 펀더멘털 용어 한 줄 설명"):
+            st.markdown(FUNDAMENTALS_HELP)
 
     st.subheader("💡 왜 이 종목?")
     why = []
