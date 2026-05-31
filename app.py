@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
-                      reference_levels, FUNDAMENTALS_HELP)
+                      reference_levels, FUNDAMENTALS_HELP, make_comparison_chart)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
@@ -300,6 +300,34 @@ def render_stock_table(rows, key, context=None):
             st.error(f"오류가 났어요: {e}")
 
 
+def render_comparison(symbols, key, default_period="6개월"):
+    """주어진 심볼들의 수익률 비교 차트 + 기간 pills + 순위 요약."""
+    periods = {"1개월": 21, "3개월": 63, "6개월": 126, "1년": 252}
+    period = st.pills("기간", list(periods.keys()), default=default_period,
+                      selection_mode="single", label_visibility="collapsed",
+                      key=f"cmp_p_{key}") or default_period
+    days = periods[period]
+
+    with st.spinner(f"{len(symbols)}개 종목 시세 모으는 중..."):
+        dfs = {s: cached_bars(s) for s in symbols}
+    if not any(v is not None and not v.empty for v in dfs.values()):
+        st.warning("시세 데이터를 받지 못했어요.")
+        return
+
+    fig, ranking = make_comparison_chart(dfs, lookback_days=days)
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("※ 모든 종목을 시작점=100으로 맞춰 겹친 거예요. "
+               "선이 위로 갈수록 그 기간 더 올랐다는 뜻이에요.")
+
+    if ranking:
+        top = ranking[:3]
+        bot = ranking[-3:][::-1]
+        st.markdown(
+            f"**🚀 상위** {' · '.join(f'{s} ({v:.0f})' for s, v in top)}  　"
+            f"**🐢 하위** {' · '.join(f'{s} ({v:.0f})' for s, v in bot)}"
+        )
+
+
 def render_theme_detail(tname):
     """선택한 테마의 설명·체인·단계별 종목 표 렌더링 (탭 3·4 공용)."""
     tinfo = THEMES[tname]
@@ -308,6 +336,11 @@ def render_theme_detail(tname):
     st.markdown(f"#### {tname}")
     st.write(tinfo["desc"])
     st.info("💡 파생 섹터 흐름:  " + "  →  ".join(seg_names))
+
+    # 📊 테마 전체 종목 수익률 비교
+    all_stocks = sorted({s for seg in tinfo["chain"] for s in seg["stocks"]})
+    with st.expander(f"📊 테마 종목 수익률 비교 ({len(all_stocks)}개 겹쳐 보기)"):
+        render_comparison(all_stocks, key=f"theme_{tname}")
 
     st.caption("👇 흐름의 단계를 누르면 그 단계의 종목이 나와요")
     pick_seg = st.pills("단계 선택", seg_names, selection_mode="single",
@@ -387,6 +420,8 @@ with tab2:
         name = st.session_state.sector_name
         st.write(f"**{name}** 대표 종목 현재 상태")
         render_stock_table(st.session_state.sector_rows, f"sector_{name}", context=name)
+        with st.expander(f"📊 섹터 종목 수익률 비교 ({len(SECTORS[name])}개 겹쳐 보기)"):
+            render_comparison(SECTORS[name], key=f"sector_{name}")
 
 # ── 탭 3: 테마 탐색 ──────────────────────────────
 with tab3:

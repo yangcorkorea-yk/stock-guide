@@ -227,6 +227,62 @@ def reference_levels(df):
     }
 
 
+def make_comparison_chart(symbols_to_df: dict, lookback_days: int = 126):
+    """
+    여러 종목의 종가를 '시작점=100' 으로 정규화해 한 차트에 겹쳐 보여줌.
+
+    symbols_to_df: {ticker: DataFrame}  (DataFrame은 'close' 컬럼 + DatetimeIndex)
+    lookback_days: 최근 N 거래일만 표시 (1개월=21, 3개월=63, 6개월=126, 1년=252)
+
+    데이터가 부족한(워밍업 안 된) 종목은 자동 제외.
+    """
+    fig = go.Figure()
+    rendered = 0
+    final_vals = []  # (sym, last_value) 정렬용
+
+    for sym, df in symbols_to_df.items():
+        if df is None or df.empty or 'close' not in df.columns:
+            continue
+        s = df['close'].tail(lookback_days).dropna()
+        if len(s) < 5:
+            continue
+        base = float(s.iloc[0])
+        if base == 0 or base != base:
+            continue
+        norm = s / base * 100
+        last = float(norm.iloc[-1])
+        final_vals.append((sym, last))
+        fig.add_trace(go.Scatter(
+            x=norm.index, y=norm.values, name=sym, mode='lines',
+            hovertemplate=f"<b>{sym}</b><br>%{{x|%Y-%m-%d}}<br>%{{y:.1f}} (시작 100)<extra></extra>",
+        ))
+        rendered += 1
+
+    fig.add_hline(y=100, line=dict(color="gray", dash="dot", width=1),
+                  annotation_text="시작점", annotation_position="right")
+    fig.update_layout(
+        height=460, margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
+                    font=dict(size=11)),
+        yaxis_title="시작=100 기준 변화",
+        hovermode="x unified",
+    )
+    # 일봉용 휴장일 제거 (분 단위 합치진 않음)
+    if rendered:
+        # 데이터프레임 중 첫 번째에서 인덱스 가져와 rangebreaks 적용
+        sample_idx = next(iter(symbols_to_df.values())).tail(lookback_days).index
+        try:
+            breaks = [dict(bounds=["sat", "mon"])]
+            bdays = pd.bdate_range(sample_idx.min(), sample_idx.max())
+            holidays = bdays.difference(sample_idx.normalize())
+            if len(holidays):
+                breaks.append(dict(values=list(holidays)))
+            fig.update_xaxes(rangebreaks=breaks)
+        except Exception:
+            pass
+    return fig, sorted(final_vals, key=lambda x: -x[1])
+
+
 def resample_bars(df, tf):
     """일봉 df를 주봉('W')/월봉('M')으로 합침. 그 외는 일봉 그대로."""
     if tf not in ("W", "M"):
