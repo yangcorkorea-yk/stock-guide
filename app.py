@@ -37,6 +37,23 @@ st.session_state.setdefault("sector_rows", None)
 st.session_state.setdefault("theme_name", None)
 st.session_state.setdefault("search_symbol", None)
 
+# ── URL 공유: ?symbol=NVDA 진입 + 종목 변경 시 URL 동기화 ──────
+# 첫 로드 때만 URL → 세션 (이후 사용자 액션이 우선)
+_url_symbol = st.query_params.get("symbol")
+if _url_symbol and st.session_state.get("search_symbol") is None:
+    _sym = _url_symbol.upper().strip()
+    if _sym:
+        st.session_state.search_symbol = _sym
+        st.session_state["search_query_text"] = _sym
+
+# 세션 → URL 동기화 (rerun 무한 루프 방지: 값이 다를 때만 갱신)
+_cur = st.session_state.get("search_symbol")
+if _cur:
+    if st.query_params.get("symbol") != _cur:
+        st.query_params["symbol"] = _cur
+elif "symbol" in st.query_params:
+    del st.query_params["symbol"]
+
 HOT_THEMES_PATH = Path(__file__).resolve().parent / "data" / "hot_themes.json"
 
 
@@ -560,7 +577,9 @@ with tab1:
 
     if st.session_state.search_symbol:
         sym = st.session_state.search_symbol
-        st.caption(f"분석 중인 종목: **{display_name(sym)}**")
+        st.caption(f"분석 중인 종목: **{display_name(sym)}**  ·  "
+                   f"🔗 공유: 주소창 URL을 카톡으로 보내면 친구도 같은 화면을 볼 수 있어요. "
+                   f"(`?symbol={sym}`)")
         with st.spinner(f"{sym} 분석 중..."):
             try:
                 df = cached_bars(sym)
