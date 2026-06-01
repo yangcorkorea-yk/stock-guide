@@ -214,6 +214,14 @@ def show_detail(symbol, df, context=None):
     st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{tf}")
     st.caption(f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)")
 
+    # ── 한 줄 정리 ────────────────────────────
+    st.subheader("🗣️ 한 줄 정리")
+    st.markdown(explain(symbol, info))
+    with st.expander("❓ RSI(과열도)·볼린저밴드(변동폭)가 뭔가요?"):
+        st.markdown(RSI_HELP)
+        st.divider()
+        st.markdown(BB_HELP)
+
     # ── 회사 ─────────────────────────────────
     st.subheader("🏢 이 회사는")
     parts = []
@@ -366,14 +374,6 @@ def show_detail(symbol, df, context=None):
                 "- '평소 다니던 길'을 가정한 거라 큰 뉴스·사건엔 쉽게 빗나가요.\n"
                 "- '지금 가격이 어디쯤인지' 가늠하는 **눈금자** 정도로만 참고하세요."
             )
-
-    # ── 한 줄 정리 ────────────────────────────
-    st.subheader("🗣️ 한 줄 정리")
-    st.markdown(explain(symbol, info))
-    with st.expander("❓ RSI(과열도)·볼린저밴드(변동폭)가 뭔가요?"):
-        st.markdown(RSI_HELP)
-        st.divider()
-        st.markdown(BB_HELP)
 
 
 
