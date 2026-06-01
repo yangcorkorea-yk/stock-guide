@@ -5,7 +5,7 @@
     "BLS": "https://www.bls.gov/schedule/news_release/",
     "BEA": "https://www.bea.gov/news/schedule"
   },
-  "last_refresh": "2026-06-01T01:12:07Z",
+  "last_refresh": "2026-06-01T07:42:07Z",
   "refresh_failures": [
     "CPI"
   ],
@@ -18,15 +18,15 @@
     },
     {
       "date": "2026-06-17",
-      "name": "FOMC 정례회의",
+      "name": "6월 FOMC 정례회의",
       "tag": "🏦 FOMC",
-      "desc": "경제 예측자료 포함"
+      "desc": "경제전망자료 포함 정례회의"
     },
     {
       "date": "2026-06-25",
-      "name": "5월 개인소비지출 발표",
+      "name": "5월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, May 2026"
     },
     {
       "date": "2026-07-14",
@@ -36,21 +36,21 @@
     },
     {
       "date": "2026-07-29",
-      "name": "FOMC 정례회의",
+      "name": "7월 FOMC 정례회의",
       "tag": "🏦 FOMC",
-      "desc": ""
+      "desc": "통화정책 결정 및 기자회견"
     },
     {
       "date": "2026-07-30",
-      "name": "6월 개인소비지출 발표",
+      "name": "6월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, June 2026"
     },
     {
       "date": "2026-07-30",
       "name": "2분기 GDP 속보치",
       "tag": "📈 GDP",
-      "desc": "2026년 2분기 국내총생산(GDP) 속보치 발표"
+      "desc": "2026년 2분기 GDP 속보치 발표"
     },
     {
       "date": "2026-08-12",
@@ -60,9 +60,9 @@
     },
     {
       "date": "2026-08-26",
-      "name": "7월 개인소비지출 발표",
+      "name": "7월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, July 2026"
     },
     {
       "date": "2026-09-10",
@@ -72,15 +72,15 @@
     },
     {
       "date": "2026-09-16",
-      "name": "FOMC 정례회의",
+      "name": "9월 FOMC 정례회의",
       "tag": "🏦 FOMC",
-      "desc": "경제 예측자료 포함"
+      "desc": "경제전망자료 포함 정례회의"
     },
     {
       "date": "2026-09-30",
-      "name": "8월 개인소비지출 발표",
+      "name": "8월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, August 2026"
     },
     {
       "date": "2026-10-14",
@@ -90,21 +90,21 @@
     },
     {
       "date": "2026-10-28",
-      "name": "FOMC 정례회의",
+      "name": "10월 FOMC 정례회의",
       "tag": "🏦 FOMC",
-      "desc": ""
+      "desc": "통화정책 결정 및 기자회견"
     },
     {
       "date": "2026-10-29",
-      "name": "9월 개인소비지출 발표",
+      "name": "9월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, September 2026"
     },
     {
       "date": "2026-10-29",
       "name": "3분기 GDP 속보치",
       "tag": "📈 GDP",
-      "desc": "2026년 3분기 국내총생산(GDP) 속보치 발표"
+      "desc": "2026년 3분기 GDP 속보치 발표"
     },
     {
       "date": "2026-11-12",
@@ -114,15 +114,15 @@
     },
     {
       "date": "2026-11-25",
-      "name": "10월 개인소비지출 발표",
+      "name": "10월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, October 2026"
     },
     {
       "date": "2026-12-09",
-      "name": "FOMC 정례회의",
+      "name": "12월 FOMC 정례회의",
       "tag": "🏦 FOMC",
-      "desc": "경제 예측자료 포함"
+      "desc": "경제전망자료 포함 정례회의"
     },
     {
       "date": "2026-12-10",
@@ -132,9 +132,9 @@
     },
     {
       "date": "2026-12-23",
-      "name": "11월 개인소비지출 발표",
+      "name": "11월 개인소비지출(PCE) 발표",
       "tag": "💵 PCE",
-      "desc": "개인소득 및 지출 통계 발표"
+      "desc": "Personal Income and Outlays, November 2026"
     }
   ]
 }
