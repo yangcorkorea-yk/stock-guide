@@ -365,28 +365,39 @@ def show_detail(symbol, df, context=None):
         else:
             st.info(f"📅 다음 실적 발표 **{edate}** (D-{days}){eps_part}")
 
-    # 재무 지표 (접이식)
+    # 재무 지표 (접이식) — HTML flex 그리드로 PC 3열 / 모바일 2열 자동
     fund_fields = ["pe", "psr", "pbr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
         with st.expander("💎 재무 지표 상세 (PER·PSR·PBR·배당·성장률)"):
             st.caption("회사의 '몸값'과 '돈 버는 힘'이에요. 같은 업종끼리 비교해야 의미 있어요.")
-            cols = st.columns(3)
-            cols[0].metric("PER", brief.get("pe") or "—",
-                           help="주가 ÷ 1주당 순이익. 적자면 표시 안 돼요.")
-            cols[1].metric("PSR", brief.get("psr") or "—",
-                           help="주가 ÷ 1주당 매출. 적자·성장주에 유용해요.")
-            cols[2].metric("PBR", brief.get("pbr") or "—",
-                           help="주가 ÷ 1주당 순자산. 자산 대비 가격.")
-            cols2 = st.columns(3)
-            cols2[0].metric("배당수익률", brief.get("div_yield") or "—",
-                            help="연 배당금 ÷ 주가.")
-            cols2[1].metric("영업이익률", brief.get("op_margin") or "—",
-                            help="매출 100원 중 본업으로 남긴 이익.")
-            cols2[2].metric("ROE", brief.get("roe") or "—",
-                            help="자기자본 대비 이익률. 15%↑면 보통 우량.")
-            cols3 = st.columns(3)
-            cols3[0].metric("매출성장(YoY)", brief.get("rev_growth") or "—",
-                            help="작년 같은 분기 대비 매출 증감.")
+
+            # (라벨, 키, 도움말) — 위 카드 순서와 일치
+            cards = [
+                ("PER", "pe", "주가 ÷ 1주당 순이익. 적자면 표시 안 돼요."),
+                ("PSR", "psr", "주가 ÷ 1주당 매출. 적자·성장주에 유용해요."),
+                ("PBR", "pbr", "주가 ÷ 1주당 순자산. 자산 대비 가격."),
+                ("배당수익률", "div_yield", "연 배당금 ÷ 주가."),
+                ("영업이익률", "op_margin", "매출 100원 중 본업으로 남긴 이익."),
+                ("ROE", "roe", "자기자본 대비 이익률. 15%↑면 보통 우량."),
+                ("매출성장(YoY)", "rev_growth", "작년 같은 분기 대비 매출 증감."),
+            ]
+            items_html = ""
+            for label, key, tip in cards:
+                value = brief.get(key) or "—"
+                items_html += (
+                    f'<div title="{tip}" '
+                    f'style="flex:1 1 calc(33.33% - 6px);min-width:140px;'
+                    f'padding:10px 12px;background:rgba(255,255,255,0.04);'
+                    f'border-radius:10px;cursor:help;">'
+                    f'<div style="font-size:0.85rem;color:#9aa0a6;margin-bottom:4px;">{label}</div>'
+                    f'<div style="font-size:1.3rem;font-weight:600;line-height:1.2;'
+                    f'word-break:break-all;">{value}</div>'
+                    f'</div>'
+                )
+            st.markdown(
+                f'<div style="display:flex;flex-wrap:wrap;gap:8px;width:100%;">{items_html}</div>',
+                unsafe_allow_html=True,
+            )
             st.caption("데이터 출처: Yahoo Finance. 분기 보고서 시차로 한국 증권사 화면과 1~2% 차이 날 수 있어요.")
             st.markdown(FUNDAMENTALS_HELP)
 
