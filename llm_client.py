@@ -54,6 +54,17 @@ def _model_analysis() -> str:
     return os.getenv("ANTHROPIC_MODEL_ANALYSIS", DEFAULT_ANALYSIS_MODEL)
 
 
+def _strip_headers(text: str) -> str:
+    """LLM 응답에서 마크다운 헤더/머릿말 제거 (안전망)."""
+    if not text:
+        return text
+    # 줄 시작의 #/##/### 같은 헤더 라인 통째로 제거
+    text = re.sub(r"^\s*#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
+    # "XXX 관련 뉴스 요약" 같은 머릿말이 한 줄로 별도 있으면 제거 (보수적으로)
+    text = re.sub(r"^\s*(.*?(요약|정리|분석)\s*)\n", "", text, count=1)
+    return text.strip()
+
+
 def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
                       headlines: list[str]) -> Optional[str]:
     """
@@ -80,7 +91,8 @@ def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
         "당신은 미국 주식 뉴스를 한국 초보 투자자에게 쉽게 요약하는 도우미입니다. "
         "예측·추천·매수/매도 권유는 절대 하지 않습니다. "
         "정확하지 않은 정보는 만들지 않습니다. "
-        "회사명은 반드시 사용자가 알려준 이름만 쓰고, 임의로 지어내지 마세요."
+        "회사명은 반드시 사용자가 알려준 이름만 쓰고, 임의로 지어내지 마세요. "
+        "출력은 본문 단락만. 제목·헤더(#·##·**굵은 큰글씨**) 절대 금지."
     )
     user = (
         f"종목: {company} (티커 {symbol}){sect}\n\n"
@@ -89,7 +101,8 @@ def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
         f"- 회사명은 '{company}'의 한국어 표기를 그대로 쓰세요 (다른 이름 금지).\n"
         "- 어려운 용어는 풀어서, 초보자가 이해할 수 있게.\n"
         "- 사실만 정리. 가격 예측·매매 권유 금지.\n"
-        "- 글머리표 없이 자연스러운 문단으로."
+        "- 제목/헤더 없이 자연스러운 문단으로만 작성.\n"
+        "- 'XXX 관련 뉴스 요약' 같은 머릿말 금지."
     )
 
     try:
@@ -103,6 +116,7 @@ def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
         text = "".join(
             (block.text if hasattr(block, "text") else "") for block in resp.content
         ).strip()
+        text = _strip_headers(text)
         return text or None
     except Exception:
         return None
@@ -151,6 +165,7 @@ def synthesize_analysis_ko(symbol: str, name: Optional[str],
         )
         text = "".join(
             (b.text if hasattr(b, "text") else "") for b in resp.content).strip()
+        text = _strip_headers(text)
         return text or None
     except Exception:
         return None
