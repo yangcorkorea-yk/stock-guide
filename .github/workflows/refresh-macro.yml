@@ -1,0 +1,44 @@
+name: Monthly — Refresh Macro Events
+
+on:
+  schedule:
+    # 매월 1일 06:00 UTC — 새 달 시작과 함께 일정 갱신
+    - cron: "0 6 1 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install beautifulsoup4
+
+      - name: Run refresh_macro_events
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-haiku-4-5' }}
+        run: python scripts/refresh_macro_events.py
+
+      - name: Commit JSON if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/macro_events.json)" ]; then
+            git add data/macro_events.json
+            git commit -m "chore(data): refresh macro_events.json [skip ci]"
+            git push
+          else
+            echo "변경 없음."
+          fi

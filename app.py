@@ -11,16 +11,25 @@
 """
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+# 티커 형식: 영문 대문자 1~5자 (+ ".A" 같은 클래스 접미사 선택)
+_TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
+
+
+def _looks_like_ticker(s: str) -> bool:
+    return bool(s and _TICKER_RE.match(s.upper()))
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
+from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 st.session_state.setdefault("sector_rows", None)
@@ -142,6 +151,27 @@ def show_detail(symbol, df, context=None):
     st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요. "
                "베타는 시장(1.0)보다 얼마나 더/덜 출렁이는지예요.")
 
+    # 📅 다음 실적 발표 (yfinance.calendar)
+    edate = brief.get("earnings_date")
+    if edate:
+        days = brief.get("earnings_days")
+        eps_part = f"  · 추정 EPS {brief['earnings_eps_est']}" if brief.get("earnings_eps_est") else ""
+        if days is None:
+            st.info(f"📅 다음 실적 발표: **{edate}**{eps_part}")
+        elif days < 0:
+            st.caption(f"📅 직전 실적 발표: {edate} ({-days}일 전)")
+        elif days == 0:
+            st.warning(f"⚠️ **오늘 실적 발표** · {edate}{eps_part}")
+        elif days <= 7:
+            st.warning(f"⚠️ **D-{days} 실적 발표 임박** · {edate}{eps_part}")
+        else:
+            st.info(f"📅 다음 실적 발표: **{edate}** (D-{days}){eps_part}")
+        st.caption("실적 발표는 가격 변동이 큰 이벤트예요. 그날을 알고 들어가요.")
+
+    # 📍 그룹(섹터/테마) 내 위치 — context 있을 때만
+    if context:
+        render_peer_summary(symbol, context)
+
     # 💎 펀더멘털 (재무 건강)
     fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
@@ -182,23 +212,29 @@ def show_detail(symbol, df, context=None):
     # 📰 최근 뉴스 (Alpaca News + LLM 한국어 요약 + 원문 링크)
     st.subheader("📰 최근 뉴스")
     news_items = cached_news(symbol)
-    if not news_items:
-        # 폴백: yfinance 헤드라인 (요약/링크 없음)
-        if brief["news"]:
-            for t in brief["news"]:
-                st.markdown(f"- {t}")
-            st.caption("※ Alpaca 뉴스 응답이 없어 회사정보 기반으로 표시 중이에요.")
-        else:
-            st.caption("최근 뉴스를 불러오지 못했어요.")
-    else:
-        headlines = tuple(n.get("headline") or "" for n in news_items if n.get("headline"))
-        summary = cached_news_summary(symbol, brief.get("sector"), headlines) if headlines else None
+    headlines = tuple(
+        (n.get("headline") or "").strip()
+        for n in news_items if n.get("headline")
+    )
+    # 폴백 헤드라인: Alpaca가 0건이면 yfinance 헤드라인 활용
+    fallback_used = False
+    if not headlines and brief.get("news"):
+        headlines = tuple(brief["news"])
+        fallback_used = True
+
+    if headlines:
+        summary = cached_news_summary(symbol, brief.get("sector"), headlines)
         if summary:
             st.markdown(summary)
-            st.caption("⚠️ AI가 헤드라인만 보고 요약한 거예요. 정확한 내용은 원문을 확인해 주세요.")
-        elif headlines:
-            st.caption("(AI 요약 미사용 — 키가 없거나 호출 실패. 원문 링크만 표시해요.)")
+            tail = "회사정보 헤드라인" if fallback_used else "Alpaca 뉴스 헤드라인"
+            st.caption(f"⚠️ AI가 {tail}만 보고 요약한 거예요. 정확한 내용은 원문을 확인해 주세요.")
+        else:
+            st.caption("(AI 요약 미사용 — `ANTHROPIC_API_KEY` 가 없거나 호출 실패. 헤드라인만 표시해요.)")
+    elif not news_items:
+        st.caption("최근 뉴스를 불러오지 못했어요.")
 
+    # 원문 링크 (Alpaca 뉴스에만 URL 있음)
+    if news_items:
         st.markdown("**🔗 원문 링크**")
         for n in news_items[:6]:
             title = (n.get("headline") or "").strip()
@@ -210,6 +246,10 @@ def show_detail(symbol, df, context=None):
                 st.markdown(f"- [{title}]({url})  _·  {src}_")
             else:
                 st.markdown(f"- {title}  _·  {src}_")
+    elif fallback_used:
+        st.markdown("**🔗 헤드라인**  _(yfinance 폴백 — 원문 URL 없음)_")
+        for t in headlines:
+            st.markdown(f"- {t}")
 
     st.subheader("📊 현재 기술적 상태")
     st.caption("아래 수치는 일봉 기준 현재 상태예요 (차트 기간과 무관).")
@@ -279,7 +319,7 @@ def render_stock_table(rows, key, context=None):
         return
     st.caption("👇 종목을 선택하면(왼쪽 선택칸 클릭) 아래에 상세가 펼쳐져요")
     table = pd.DataFrame([{
-        "종목": r['sym'],
+        "종목": display_name(r['sym']),
         "시세": f"${r['price']:.2f}  {r['chg']:+.1f}%",
         "상태": badge(r['status']),
     } for r in rows])
@@ -287,15 +327,16 @@ def render_stock_table(rows, key, context=None):
                          on_select="rerun", selection_mode="single-row", key=f"tbl_{key}")
     sel = event.selection.rows
     if sel:
-        picked = table.iloc[sel[0]]["종목"]
+        # rows 원본에서 ticker 추출 (table의 종목 컬럼은 한국어로 바뀌었으니)
+        picked_sym = rows[sel[0]]['sym']
         st.divider()
-        st.markdown(f"### 🔎 {picked} 자세히 보기")
+        st.markdown(f"### 🔎 {display_name(picked_sym)} 자세히 보기")
         try:
-            ddf = cached_bars(picked)
+            ddf = cached_bars(picked_sym)
             if ddf is None or len(ddf) < 30:
                 st.error("데이터를 받지 못했어요.")
             else:
-                show_detail(picked, ddf, context=context)
+                show_detail(picked_sym, ddf, context=context)
         except Exception as e:
             st.error(f"오류가 났어요: {e}")
 
@@ -328,6 +369,54 @@ def render_comparison(symbols, key, default_period="6개월"):
         )
 
 
+def render_peer_summary(symbol, context):
+    """현재 종목이 같은 섹터/테마 동료 중 어디쯤인지 한 줄 요약."""
+    if not context:
+        return
+    peers, pname = None, None
+    # 섹터 직접 매칭
+    if context in SECTORS:
+        peers, pname = SECTORS[context], context
+    elif " · " in context:
+        # "테마명 · 단계명" 형태
+        tname, _, seg_name = context.partition(" · ")
+        if tname in THEMES:
+            for seg in THEMES[tname]["chain"]:
+                if seg["name"] == seg_name:
+                    peers, pname = seg["stocks"], context
+                    break
+            if not peers:
+                peers = sorted({s for seg in THEMES[tname]["chain"] for s in seg["stocks"]})
+                pname = tname
+    if not peers or symbol not in peers or len(peers) < 3:
+        return
+
+    days = 63  # 약 3개월
+    rets = {}
+    for s in peers:
+        df = cached_bars(s)
+        if df is None or len(df) < 5:
+            continue
+        c = df['close'].tail(days + 1).dropna()
+        if len(c) < 2:
+            continue
+        rets[s] = (c.iloc[-1] / c.iloc[0] - 1) * 100
+    if symbol not in rets or len(rets) < 3:
+        return
+
+    ranked = sorted(rets.items(), key=lambda x: -x[1])
+    rank = next(i for i, (s, _) in enumerate(ranked, 1) if s == symbol)
+    avg = sum(rets.values()) / len(rets)
+    my = rets[symbol]
+    rel = my - avg
+
+    arrow = "🟢 평균보다 강함" if rel > 1 else ("🔴 평균보다 약함" if rel < -1 else "⚪ 평균 수준")
+    st.markdown(
+        f"📍 **'{pname}'** 내 **{rank}/{len(rets)}위**  ·  "
+        f"3개월 **{my:+.1f}%** (그룹 평균 {avg:+.1f}%, {arrow})"
+    )
+
+
 def render_theme_detail(tname):
     """선택한 테마의 설명·체인·단계별 종목 표 렌더링 (탭 3·4 공용)."""
     tinfo = THEMES[tname]
@@ -357,36 +446,101 @@ def render_theme_detail(tname):
 st.title("📈 종목 길잡이")
 st.caption("미국주식 초보자를 위한 '지금 이 종목, 어떤 상태?' 도구")
 
+
+# ── 거시 이벤트 캘린더 (모든 탭 위 상단에 노출) ─────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_macro(days):
+    return upcoming_events(days=days)
+
+
+_events = _cached_macro(30)
+if _events:
+    nearest = _events[0]
+    d_until = nearest.get("days_until")
+    if d_until is not None and d_until == 0:
+        d_str = "오늘"
+    elif d_until is not None and d_until <= 7:
+        d_str = f"D-{d_until}"
+    else:
+        d_str = f"D-{d_until}" if d_until is not None else ""
+    label = f"📅 다가오는 시장 이벤트 — {nearest['tag']} {nearest['name']} ({d_str})"
+    with st.expander(label):
+        for e in _events:
+            d = e.get("days_until")
+            if d is None:
+                d_label = "?"
+            elif d == 0:
+                d_label = "**오늘**"
+            elif d < 0:
+                d_label = f"{-d}일 전"
+            else:
+                d_label = f"D-{d}"
+            st.markdown(f"- **{e['date']}** ({d_label})  ·  {e['tag']}  **{e['name']}**")
+            if e.get("desc"):
+                st.caption(f"　　{e['desc']}")
+        meta = get_macro_meta()
+        last = meta.get("last_refresh")
+        fails = meta.get("refresh_failures") or []
+        if last:
+            tag = f"자동 갱신: {last[:10]}"
+            if fails:
+                tag += f"  ·  ⚠️ 일부 소스 추출 실패: {', '.join(fails)}"
+            st.caption(tag + "  ·  출처: "
+                       "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
+                       "[BLS](https://www.bls.gov/schedule/news_release/) · "
+                       "[BEA](https://www.bea.gov/news/schedule)")
+        else:
+            st.caption("⚠️ 일정은 패턴 기반 추정치예요. 실제 발표일은 "
+                       "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
+                       "[BLS](https://www.bls.gov/schedule/news_release/) · "
+                       "[BEA](https://www.bea.gov/news/schedule) 공식 캘린더에서 확인하세요.")
+
+
 tab1, tab2, tab3, tab4 = st.tabs(
     ["🔍 종목 검색", "📂 섹터 탐색", "📂 테마 탐색", "🔥 뜨는 테마"]
 )
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
 with tab1:
-    query = st.text_input(
-        "회사명 또는 티커",
-        placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
-        key="search_query",
-    ).strip()
+    st.session_state.setdefault("search_query_text", "")
 
+    with st.form("ticker_search_form", clear_on_submit=False):
+        typed = st.text_input(
+            "회사명(한국어/영문) 또는 티커",
+            value=st.session_state.get("search_query_text", ""),
+            placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
+            key="search_typed",
+        )
+        submitted = st.form_submit_button("🔍 검색", use_container_width=True, type="primary")
+
+    if submitted:
+        s = (typed or "").strip()
+        st.session_state.search_query_text = s
+        qu_now = s.upper()
+        # 검색 동작:
+        #  ① 카탈로그 정확 티커(NVDA 등) → 즉시 분석
+        #  ② 카탈로그에 매칭 후보 있으면 → 사용자 선택용 후보 표시 (아래에서)
+        #  ③ 후보 0개 + 티커처럼 생긴 입력(FIG 등) → 카탈로그 외라도 그대로 시도
+        if qu_now and qu_now in TICKER_NAMES:
+            st.session_state.search_symbol = qu_now
+        elif s and _looks_like_ticker(qu_now) and not search_tickers(s, limit=1):
+            st.session_state.search_symbol = qu_now
+
+    query = st.session_state.get("search_query_text", "")
     qu = query.upper()
-    # 정확한 티커 직타 → 바로 검색 가능
-    if query and qu in TICKER_NAMES:
-        if st.button(f"🔎 {display_name(qu)} 분석하기",
-                     use_container_width=True, type="primary", key="search_btn_exact"):
-            st.session_state.search_symbol = qu
-    # 그 외 입력 → 매칭 후보를 pills로
-    elif query:
+
+    # 후보 표시: 카탈로그에 부분 매칭이 있는 경우 (예: '엔비', 'apple')
+    if query and qu not in TICKER_NAMES:
         candidates = search_tickers(query, limit=8)
         if candidates:
-            st.caption(f"'{query}' 와 비슷한 종목 — 골라주세요")
+            st.caption(f"'{query}' 와 비슷한 종목 — 톡 누르면 분석돼요")
             labels = [f"{name.split()[0]} ({tk})" for tk, name in candidates]
             picked = st.pills("후보 종목", labels, selection_mode="single",
                               label_visibility="collapsed", key="search_pick")
             if picked:
                 idx = labels.index(picked)
                 st.session_state.search_symbol = candidates[idx][0]
-        else:
+        elif not _looks_like_ticker(qu):
             st.info(f"'{query}' 와 비슷한 종목을 못 찾았어요. 회사명(한국어/영문) 또는 티커로 다시 시도해 주세요.")
 
     if st.session_state.search_symbol:
