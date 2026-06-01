@@ -283,6 +283,57 @@ def make_comparison_chart(symbols_to_df: dict, lookback_days: int = 126):
     return fig, sorted(final_vals, key=lambda x: -x[1])
 
 
+def market_context():
+    """
+    시장 전반 컨텍스트 — 오늘 변동률.
+    · SPY(S&P500), QQQ(나스닥100): Alpaca 일봉 (안정적)
+    · VIX(공포지수), USD/KRW(환율): yfinance (실패 시 생략, graceful)
+    반환: [{label, value, pct, kind}, ...]  (못 받은 항목은 제외)
+    kind: 'index'면 pct를 등락률로, 'level'이면 절대값 위주.
+    """
+    out = []
+
+    def _alpaca_change(sym, label):
+        try:
+            df = get_bars(sym, days=10)
+            if df is None or len(df) < 2:
+                return None
+            close = float(df['close'].iloc[-1])
+            prev = float(df['close'].iloc[-2])
+            return {"label": label, "value": f"{close:,.2f}",
+                    "pct": (close / prev - 1) * 100, "kind": "index"}
+        except Exception:
+            return None
+
+    for sym, label in (("SPY", "S&P500"), ("QQQ", "나스닥100")):
+        r = _alpaca_change(sym, label)
+        if r:
+            out.append(r)
+
+    # VIX·환율은 yfinance (지수/환율은 Alpaca 무료 플랜에 없음)
+    try:
+        import yfinance as yf
+        data = yf.download("^VIX KRW=X", period="5d", interval="1d",
+                           progress=False, threads=True, auto_adjust=True)
+        for tk, label, kind in (("^VIX", "공포지수(VIX)", "level"),
+                                ("KRW=X", "환율(원/$)", "level")):
+            try:
+                series = data[tk]["Close"].dropna()
+            except Exception:
+                series = None
+            if series is None or len(series) < 2:
+                continue
+            cur = float(series.iloc[-1])
+            prev = float(series.iloc[-2])
+            fmt = f"{cur:,.1f}" if kind == "level" else f"{cur:,.2f}"
+            out.append({"label": label, "value": fmt,
+                        "pct": (cur / prev - 1) * 100, "kind": kind})
+    except Exception:
+        pass
+
+    return out
+
+
 def resample_bars(df, tf):
     """일봉 df를 주봉('W')/월봉('M')으로 합침. 그 외는 일봉 그대로."""
     if tf not in ("W", "M"):
@@ -584,13 +635,25 @@ def company_brief(symbol):
         out["psr"] = _ratio(info.get("priceToSalesTrailing12Months"))
         out["pbr"] = _ratio(info.get("priceToBook"))
 
-        # 배당수익률: yfinance 최근 버전은 percent(2.5=2.5%), 옛 버전은 decimal(0.025).
-        dy = info.get("dividendYield")
-        if isinstance(dy, (int, float)) and dy > 0:
-            pct = dy if dy > 1 else dy * 100
-            out["div_yield"] = f"{pct:.2f}%"
-        elif isinstance(dy, (int, float)):
-            out["div_yield"] = "0%"
+        # 배당수익률: yfinance의 dividendYield 필드는 단위 일관성이 없음
+        # (어떤 종목은 0.0089 = decimal, 어떤 종목은 0.89 = 이미 percent).
+        # 더 안정적인 방법: dividendRate / currentPrice 로 직접 계산.
+        div_rate = (info.get("dividendRate")
+                    or info.get("trailingAnnualDividendRate"))
+        price = (info.get("currentPrice")
+                 or info.get("regularMarketPrice")
+                 or info.get("previousClose"))
+        if (isinstance(div_rate, (int, float)) and div_rate > 0
+                and isinstance(price, (int, float)) and price > 0):
+            out["div_yield"] = f"{(div_rate / price) * 100:.2f}%"
+        else:
+            # 폴백: dividendYield 필드 (1보다 작으면 decimal, 크면 이미 percent로 가정)
+            dy = info.get("dividendYield")
+            if isinstance(dy, (int, float)) and dy > 0:
+                pct = dy * 100 if dy < 1 else dy
+                out["div_yield"] = f"{pct:.2f}%"
+            elif isinstance(dy, (int, float)):
+                out["div_yield"] = "0%"
 
         out["op_margin"] = _pct(info.get("operatingMargins"))
         out["profit_margin"] = _pct(info.get("profitMargins"))
@@ -665,3 +728,97 @@ FUNDAMENTALS_HELP = """\
 
 ⚠️ 위 숫자들은 한 시점의 스냅샷이에요. 한 줄 비교보단 **추세**와 **업종 동료**랑의 비교가 더 중요해요.
 """
+
+
+# ── 비교 그룹 자동 인식: 카탈로그 외 종목도 yfinance 메타로 매칭 ─────
+# industry(영문) 키워드 → 우리 SECTORS 그룹명
+_INDUSTRY_TO_GROUP = {
+    "semiconductor": "반도체",
+    "software": "클라우드 · SaaS",
+    "internet content": "AI · 빅테크",
+    "internet retail": "소비재 (경기)",
+    "aerospace": "방산 · 항공",
+    "defense": "방산 · 항공",
+    "drug manufacturers": "헬스케어 · 제약",
+    "pharmaceutical": "헬스케어 · 제약",
+    "biotech": "바이오테크",
+    "medical devices": "바이오테크",
+    "diagnostics": "바이오테크",
+    "bank": "금융 · 은행",
+    "capital markets": "금융 · 은행",
+    "insurance": "금융 · 은행",
+    "asset management": "금융 · 은행",
+    "credit services": "핀테크 · 결제",
+    "financial data": "핀테크 · 결제",
+    "reit": "부동산 (REIT)",
+    "real estate": "부동산 (REIT)",
+    "oil & gas": "에너지",
+    "renewable": "친환경 · 신재생",
+    "solar": "친환경 · 신재생",
+    "utilities": "유틸리티",
+    "auto manufacturers": "전기차 · 2차전지",
+    "auto parts": "전기차 · 2차전지",
+    "airlines": "운송 · 물류",
+    "railroads": "운송 · 물류",
+    "trucking": "운송 · 물류",
+    "integrated freight": "운송 · 물류",
+    "specialty retail": "소비재 (경기)",
+    "restaurants": "소비재 (경기)",
+    "lodging": "여행 · 호텔",
+    "travel services": "여행 · 호텔",
+    "resorts & casinos": "여행 · 호텔",
+    "entertainment": "미디어 · 엔터",
+    "broadcasting": "미디어 · 엔터",
+    "telecom": "통신",
+    "communication equipment": "통신",
+    "steel": "소재",
+    "chemicals": "소재",
+    "copper": "소재",
+    "gold": "소재",
+    "household": "소비재 (필수)",
+    "beverages": "소비재 (필수)",
+    "packaged foods": "소비재 (필수)",
+    "tobacco": "소비재 (필수)",
+}
+
+# 한국어 sector(_SECTOR_KO 변환 후) → 그룹명 (industry 매칭 실패 시 폴백)
+_SECTOR_KO_TO_GROUP = {
+    "기술": "AI · 빅테크",
+    "커뮤니케이션": "미디어 · 엔터",
+    "헬스케어": "헬스케어 · 제약",
+    "금융": "금융 · 은행",
+    "소비재(경기민감)": "소비재 (경기)",
+    "소비재(필수)": "소비재 (필수)",
+    "산업재": "산업재 · 기계",
+    "에너지": "에너지",
+    "유틸리티": "유틸리티",
+    "소재": "소재",
+    "부동산": "부동산 (REIT)",
+}
+
+
+def find_peer_group(symbol: str, industry: str = None, sector_ko: str = None):
+    """
+    종목의 비교 그룹(섹터)을 찾는다.
+
+    우선순위:
+      ① SECTORS 에 직접 속한 첫 번째 그룹
+      ② industry(영문) 키워드 매칭 → 그 그룹에 symbol 추가
+      ③ 한국어 sector 매핑 폴백 → 그 그룹에 symbol 추가
+
+    반환: (group_name, peer_list) 또는 (None, None)
+    """
+    sym = symbol.upper()
+    for name, syms in SECTORS.items():
+        if sym in syms:
+            return name, list(syms)
+    if industry:
+        il = industry.lower()
+        for key, grp in _INDUSTRY_TO_GROUP.items():
+            if key in il and grp in SECTORS:
+                return grp, list(SECTORS[grp]) + [sym]
+    if sector_ko:
+        grp = _SECTOR_KO_TO_GROUP.get(sector_ko)
+        if grp and grp in SECTORS:
+            return grp, list(SECTORS[grp]) + [sym]
+    return None, None
