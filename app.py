@@ -120,12 +120,29 @@ def analyze_tickers(tickers):
     return rows
 
 
+def _range_bar_52w(df):
+    """52주 레인지에서 현재가 위치를 막대로 시각화."""
+    closes = df['close'].tail(252).dropna()
+    if len(closes) < 20:
+        return
+    lo, hi, cur = float(closes.min()), float(closes.max()), float(closes.iloc[-1])
+    if hi <= lo:
+        return
+    pos = max(0.0, min(1.0, (cur - lo) / (hi - lo)))
+    st.progress(pos, text=f"52주 위치 {pos*100:.0f}%　·　최저 ${lo:,.0f} ~ 최고 ${hi:,.0f}")
+
+
 def show_detail(symbol, df, context=None):
     info = analyze(df)
+    brief = cached_brief(symbol)
+
+    # ── 핵심 요약 ─────────────────────────────
     c1, c2 = st.columns(2)
     c1.metric("현재가", f"${info['close']:.2f}", f"{info['change']:+.2f}%")
     c2.metric("상태", info['status'])
+    _range_bar_52w(df)
 
+    # ── 차트 ─────────────────────────────────
     st.subheader("📈 차트")
     tf = st.pills("기간", ["일봉", "주봉", "월봉"], default="일봉",
                   selection_mode="single", label_visibility="collapsed",
@@ -135,7 +152,6 @@ def show_detail(symbol, df, context=None):
     else:
         long_df = cached_bars_long(symbol)
         chart_df = resample_bars(long_df, "W" if tf == "주봉" else "M")
-    st.caption(f"{tf} · 위: 가격(캔들) + 볼린저밴드  /  아래: RSI · 빨강=상승, 파랑=하락")
 
     # 일봉일 때만 참고 가격대(진입/매도/손절) 수평선 표시
     fig = make_chart(chart_df)
@@ -152,101 +168,79 @@ def show_detail(symbol, df, context=None):
         except Exception:
             levels = None
     st.plotly_chart(fig, use_container_width=True)
+    st.caption(f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)")
 
-    brief = cached_brief(symbol)
-
-    st.subheader("🏢 회사 한눈에")
-    bits = []
+    # ── 회사 ─────────────────────────────────
+    st.subheader("🏢 이 회사는")
+    parts = []
     if brief["sector"]:
         s = brief["sector"] + (f" · {brief['industry']}" if brief["industry"] else "")
-        bits.append(f"**업종** {s}")
+        parts.append(f"**업종** {s}")
     if brief["cap"]:
-        bits.append(f"**시총** {brief['cap']}")
+        parts.append(f"**시총** {brief['cap']}")
     if brief.get("beta"):
-        bits.append(f"**베타** {brief['beta']}")
-    bits.append(f"**52주 고점 대비** {info['high_52w_pct']:+.0f}%")
-    st.write("　·　".join(bits))
-    st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요. "
-               "베타는 시장(1.0)보다 얼마나 더/덜 출렁이는지예요.")
+        parts.append(f"**베타** {brief['beta']}")
+    if parts:
+        st.markdown("　·　".join(parts))
+    if context:
+        st.caption(f"🏷️ '{context}' 흐름에 속한 종목이에요.")
 
-    # 📅 다음 실적 발표 (yfinance.calendar)
-    edate = brief.get("earnings_date")
-    if edate:
-        days = brief.get("earnings_days")
-        eps_part = f"  · 추정 EPS {brief['earnings_eps_est']}" if brief.get("earnings_eps_est") else ""
-        if days is None:
-            st.info(f"📅 다음 실적 발표: **{edate}**{eps_part}")
-        elif days < 0:
-            st.caption(f"📅 직전 실적 발표: {edate} ({-days}일 전)")
-        elif days == 0:
-            st.warning(f"⚠️ **오늘 실적 발표** · {edate}{eps_part}")
-        elif days <= 7:
-            st.warning(f"⚠️ **D-{days} 실적 발표 임박** · {edate}{eps_part}")
-        else:
-            st.info(f"📅 다음 실적 발표: **{edate}** (D-{days}){eps_part}")
-        st.caption("실적 발표는 가격 변동이 큰 이벤트예요. 그날을 알고 들어가요.")
-
-    # 📍 그룹(섹터/테마) 내 위치
-    # · context 명시(섹터/테마 탭에서 진입) 우선
-    # · 없으면 카탈로그 또는 yfinance industry/sector 로 자동 인식
+    # 같은 그룹 안에서의 위치 + 비교
     if context:
         group_name = context
         group_peers = _resolve_context_peers(context)
     else:
         group_name, group_peers = find_peer_group(
-            symbol, brief.get("industry"), brief.get("sector")
-        )
+            symbol, brief.get("industry"), brief.get("sector"))
     if group_name and group_peers:
         render_peer_summary(symbol, group_name, group_peers)
         if len(group_peers) >= 3:
-            with st.expander(f"📊 '{group_name}' 그룹 수익률 비교 ({len(group_peers)}개 겹쳐 보기)"):
+            with st.expander(f"📊 '{group_name}' 그룹과 수익률 비교하기"):
                 render_comparison(group_peers, key=f"detail_{symbol}")
 
-    # 💎 펀더멘털 (재무 건강)
+    # 다음 실적 발표
+    edate = brief.get("earnings_date")
+    if edate:
+        days = brief.get("earnings_days")
+        eps_part = f" · 추정 EPS {brief['earnings_eps_est']}" if brief.get("earnings_eps_est") else ""
+        if days is None:
+            st.info(f"📅 다음 실적 발표 **{edate}**{eps_part}")
+        elif days < 0:
+            st.caption(f"📅 직전 실적 발표 {edate} ({-days}일 전)")
+        elif days == 0:
+            st.warning(f"📅 **오늘 실적 발표**{eps_part} — 변동성이 클 수 있어요.")
+        elif days <= 7:
+            st.warning(f"📅 **실적 발표 D-{days}** ({edate}){eps_part} — 발표 전후 변동성에 유의하세요.")
+        else:
+            st.info(f"📅 다음 실적 발표 **{edate}** (D-{days}){eps_part}")
+
+    # 재무 지표 (접이식)
     fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
-        st.subheader("💎 재무 건강")
-        st.caption("회사의 '몸값'과 '돈 잘 버는 정도'. **같은 업종끼리만** 비교해야 의미 있어요.")
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("PER (수익 대비)", brief.get("pe") or "—",
-                  help="주가 ÷ 1주당 순이익. 적자면 표시 안 됨.")
-        c2.metric("PSR (매출 대비)", brief.get("psr") or "—",
-                  help="주가 ÷ 1주당 매출. 적자 회사·성장주에 유용.")
-        c3.metric("배당수익률", brief.get("div_yield") or "—",
-                  help="연 배당금 ÷ 주가.")
-
-        c4, c5, c6 = st.columns(3)
-        c4.metric("영업이익률", brief.get("op_margin") or "—",
-                  help="매출 100원 중 본업으로 남긴 이익.")
-        c5.metric("매출 성장(YoY)", brief.get("rev_growth") or "—",
-                  help="작년 같은 분기 대비 매출 증감.")
-        c6.metric("ROE", brief.get("roe") or "—",
-                  help="자기자본으로 얼마나 효율적으로 이익을 냈는지. 15%↑면 우량.")
-
-        with st.expander("❓ 펀더멘털 용어 한 줄 설명"):
+        with st.expander("💎 재무 지표 자세히 (PER·PSR·배당·성장률)"):
+            st.caption("회사의 '몸값'과 '돈 버는 힘'이에요. 같은 업종끼리 비교해야 의미 있어요.")
+            cols = st.columns(3)
+            cols[0].metric("PER", brief.get("pe") or "—",
+                           help="주가 ÷ 1주당 순이익. 적자면 표시 안 돼요.")
+            cols[1].metric("PSR", brief.get("psr") or "—",
+                           help="주가 ÷ 1주당 매출. 적자·성장주에 유용해요.")
+            cols[2].metric("배당수익률", brief.get("div_yield") or "—",
+                           help="연 배당금 ÷ 주가.")
+            cols2 = st.columns(3)
+            cols2[0].metric("영업이익률", brief.get("op_margin") or "—",
+                            help="매출 100원 중 본업으로 남긴 이익.")
+            cols2[1].metric("매출성장", brief.get("rev_growth") or "—",
+                            help="작년 같은 분기 대비 매출 증감.")
+            cols2[2].metric("ROE", brief.get("roe") or "—",
+                            help="자기자본 대비 이익률. 15%↑면 보통 우량.")
             st.markdown(FUNDAMENTALS_HELP)
 
-    st.subheader("💡 왜 이 종목?")
-    why = []
-    if context:
-        line = f"- 🏷️ **'{context}'** 흐름에 속해요"
-        if brief["industry"]:
-            line += f" — {brief['industry']} 업종이라서요"
-        why.append(line)
-    elif brief["industry"]:
-        why.append(f"- 🏷️ **업종**: {brief['industry']}")
-    if why:
-        st.markdown("\n".join(why))
-
-    # 📰 최근 뉴스 (Alpaca News + LLM 한국어 요약 + 원문 링크)
+    # ── 뉴스 ─────────────────────────────────
     st.subheader("📰 최근 뉴스")
     news_items = cached_news(symbol)
     headlines = tuple(
         (n.get("headline") or "").strip()
-        for n in news_items if n.get("headline")
-    )
-    # 폴백 헤드라인: Alpaca가 0건이면 yfinance 헤드라인 활용
+        for n in news_items if n.get("headline"))
     fallback_used = False
     if not headlines and brief.get("news"):
         headlines = tuple(brief["news"])
@@ -256,14 +250,12 @@ def show_detail(symbol, df, context=None):
         summary = cached_news_summary(symbol, brief.get("sector"), headlines)
         if summary:
             st.markdown(summary)
-            tail = "회사정보 헤드라인" if fallback_used else "Alpaca 뉴스 헤드라인"
-            st.caption(f"⚠️ AI가 {tail}만 보고 요약한 거예요. 정확한 내용은 원문을 확인해 주세요.")
+            st.caption("AI가 헤드라인을 요약한 거예요. 자세한 내용은 원문을 확인해 주세요.")
         else:
-            st.caption("(AI 요약 미사용 — `ANTHROPIC_API_KEY` 가 없거나 호출 실패. 헤드라인만 표시해요.)")
+            st.caption("AI 요약은 잠시 쉬어가요 (키 미설정 또는 호출 실패). 헤드라인만 보여드려요.")
     elif not news_items:
         st.caption("최근 뉴스를 불러오지 못했어요.")
 
-    # 원문 링크 (Alpaca 뉴스에만 URL 있음)
     if news_items:
         st.markdown("**🔗 원문 링크**")
         for n in news_items[:6]:
@@ -272,74 +264,58 @@ def show_detail(symbol, df, context=None):
             src = n.get("source") or ""
             if not title:
                 continue
-            if url:
-                st.markdown(f"- [{title}]({url})  _·  {src}_")
-            else:
-                st.markdown(f"- {title}  _·  {src}_")
+            st.markdown(f"- [{title}]({url})　_{src}_" if url else f"- {title}　_{src}_")
     elif fallback_used:
-        st.markdown("**🔗 헤드라인**  _(yfinance 폴백 — 원문 URL 없음)_")
         for t in headlines:
             st.markdown(f"- {t}")
 
-    st.subheader("📊 현재 기술적 상태")
-    st.caption("아래 수치는 일봉 기준 현재 상태예요 (차트 기간과 무관).")
-    st.write(f"- **RSI (과열도)**: {info['rsi']:.0f}  _(70↑ 과열 / 35↓ 과매도)_")
-    st.write(f"- **볼린저밴드 위치 (변동폭)**: {info['bb']:.2f}  _(1.0↑ 상단돌파 / 0.15↓ 하단근처)_")
+    # ── 기술적 상태 ───────────────────────────
+    st.subheader("📊 기술적 상태")
+    st.caption("일봉 기준 현재 수치예요 (차트에서 고른 기간과는 별개).")
+    st.markdown(f"- **RSI (과열도)** {info['rsi']:.0f}　_(70↑ 과열 / 35↓ 과매도)_")
+    st.markdown(f"- **볼린저밴드 위치 (변동폭)** {info['bb']:.2f}　_(1.0↑ 상단돌파 / 0.15↓ 하단근처)_")
     if info.get('rvol') is not None:
         rv = info['rvol']
-        tag = "평소보다 많음 🔥" if rv >= 1.5 else ("평소보다 적음 💤" if rv < 0.7 else "보통")
-        st.write(f"- **거래량 (거래쏠림)**: 평균의 {rv:.1f}배 — {tag}")
-        st.caption("※ 거래량은 무료 IEX 피드 기준이라 실제 전체 거래량보다 작게 표시돼요 (절대값보다 '평소 대비' 상대 비교용).")
-    st.write(f"- **추세**: {info['trend']}")
-    st.caption(f"기준일: {info['date']}")
+        tag = "평소보다 많아요 🔥" if rv >= 1.5 else ("평소보다 적어요 💤" if rv < 0.7 else "보통이에요")
+        st.markdown(f"- **거래량 (거래쏠림)** 평균의 {rv:.1f}배 — {tag}")
+    st.markdown(f"- **추세** {info['trend']}")
+    st.caption(f"기준일 {info['date']}　·　거래량은 무료 IEX 피드라 실제보다 작게 나와요 (절대값 말고 '평소 대비'로만 보세요).")
 
-    # 📍 참고 가격대 (규칙 기반 — 예측·추천 아님)
+    # ── 참고 가격대 ───────────────────────────
     if levels is None:
-        # 사용자가 주봉/월봉 차트를 본 경우에도 참고값은 일봉 기준으로 계산
         try:
             levels = reference_levels(df)
         except Exception:
             levels = None
     if levels is not None:
-        st.subheader("📍 참고 가격대  _(규칙 계산값 · 예측 아님)_")
-        st.caption(
-            "아래는 **사용자가 직접 판단할 때 참고하라고** 규칙으로 계산한 가격대예요. "
-            "예측·매수/매도 권유 아닙니다."
-        )
-        with st.expander("⚠️ 한계 — 이런 기계적 규칙의 진실"):
+        st.subheader("📍 참고 가격대")
+        st.caption("규칙으로 계산한 참고값이에요. 예측·매수·매도 권유가 아닙니다.")
+        c1, c2, c3 = st.columns(3)
+        for col, key, head in ((c1, 'entry', '🔵 진입 참고'),
+                               (c2, 'exit', '🔴 매도 참고'),
+                               (c3, 'stop', '⚫ 손절 라인')):
+            with col:
+                st.markdown(f"**{head}**")
+                for it in levels[key]:
+                    pct = (it['price'] / levels['close'] - 1) * 100
+                    st.markdown(f"${it['price']:.2f}　_{pct:+.1f}%_")
+                    st.caption(f"{it['label']} — {it['rule']}")
+        st.caption(f"기준 종가 ${levels['close']:.2f}　·　ATR(14) ${levels['atr14']:.2f}")
+        with st.expander("⚠️ 이 값의 한계 (꼭 읽어보세요)"):
             st.markdown(
-                "- 이런 진입/매도/손절 규칙들은 **과거 백테스트에서 단순 보유를 못 이긴 경우가 많아요**.\n"
-                "- '평소 다니던 길'을 가정한 규칙이라, 큰 뉴스/사건엔 쉽게 깨져요.\n"
-                "- 그래도 '지금 어디쯤이지?'를 가늠하는 **눈금자** 정도로는 쓸모 있어요."
+                "- 이런 진입·매도·손절 규칙은 **과거 검증에서 단순 보유를 못 이긴 경우가 많아요**.\n"
+                "- '평소 다니던 길'을 가정한 거라 큰 뉴스·사건엔 쉽게 빗나가요.\n"
+                "- '지금 가격이 어디쯤인지' 가늠하는 **눈금자** 정도로만 참고하세요."
             )
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**🔵 진입 참고**")
-            for it in levels['entry']:
-                pct = (it['price'] / levels['close'] - 1) * 100
-                st.write(f"- ${it['price']:.2f}  _({pct:+.1f}%)_  · {it['label']}")
-                st.caption(it['rule'])
-        with c2:
-            st.markdown("**🔴 매도 참고**")
-            for it in levels['exit']:
-                pct = (it['price'] / levels['close'] - 1) * 100
-                st.write(f"- ${it['price']:.2f}  _({pct:+.1f}%)_  · {it['label']}")
-                st.caption(it['rule'])
-        with c3:
-            st.markdown("**⚫ 손절 라인**")
-            for it in levels['stop']:
-                pct = (it['price'] / levels['close'] - 1) * 100
-                st.write(f"- ${it['price']:.2f}  _({pct:+.1f}%)_  · {it['label']}")
-                st.caption(it['rule'])
-        st.caption(f"기준일 종가 ${levels['close']:.2f} · ATR(14) ${levels['atr14']:.2f}")
-
-    st.subheader("🗣️ 쉬운 설명")
+    # ── 한 줄 정리 ────────────────────────────
+    st.subheader("🗣️ 한 줄 정리")
     st.markdown(explain(symbol, info))
-    with st.expander("❓ RSI(과열도)가 뭔가요?"):
+    with st.expander("❓ RSI(과열도)·볼린저밴드(변동폭)가 뭔가요?"):
         st.markdown(RSI_HELP)
-    with st.expander("❓ 볼린저밴드(변동폭)가 뭔가요?"):
+        st.divider()
         st.markdown(BB_HELP)
+
 
 
 def render_stock_table(rows, key, context=None):
