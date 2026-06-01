@@ -54,6 +54,35 @@ if _cur:
 elif "symbol" in st.query_params:
     del st.query_params["symbol"]
 
+
+# ── 관심종목: URL 쿼리(?watch=NVDA,AMD)에 저장 → 새로고침에도 유지 ──
+def get_watchlist():
+    raw = st.query_params.get("watch", "")
+    seen, out = set(), []
+    for s in raw.split(","):
+        s = s.strip().upper()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def set_watchlist(items):
+    items = [s for s in items if s]
+    if items:
+        st.query_params["watch"] = ",".join(items)
+    elif "watch" in st.query_params:
+        del st.query_params["watch"]
+
+
+def toggle_watch(symbol):
+    wl = get_watchlist()
+    if symbol in wl:
+        wl.remove(symbol)
+    else:
+        wl.append(symbol)
+    set_watchlist(wl)
+
 HOT_THEMES_PATH = Path(__file__).resolve().parent / "data" / "hot_themes.json"
 
 
@@ -150,6 +179,12 @@ def show_detail(symbol, df, context=None):
     c1.metric("현재가", f"${info['close']:.2f}", f"{info['change']:+.2f}%")
     c2.metric("상태", info['status'])
     _range_bar_52w(df)
+
+    in_wl = symbol in get_watchlist()
+    if st.button("⭐ 관심종목에서 빼기" if in_wl else "☆ 관심종목에 담기",
+                 key=f"wl_{symbol}_{context}", use_container_width=True):
+        toggle_watch(symbol)
+        st.rerun()
 
     # ── 차트 ─────────────────────────────────
     st.subheader("📈 차트")
@@ -554,6 +589,23 @@ with tab1:
             key="search_typed",
         )
         submitted = st.form_submit_button("🔍 검색", use_container_width=True, type="primary")
+
+    # 관심종목 (URL에 저장됨)
+    _wl = get_watchlist()
+    if _wl:
+        with st.expander(f"⭐ 관심종목 ({len(_wl)})", expanded=False):
+            _wl_rows = analyze_tickers(_wl)
+            if not _wl_rows:
+                st.caption("관심종목 시세를 불러오지 못했어요.")
+            for r in _wl_rows:
+                cc = st.columns([4, 3, 2])
+                cc[0].markdown(f"**{display_name(r['sym'])}**")
+                cc[1].markdown(f"${r['price']:.2f}　{r['chg']:+.1f}%　{badge(r['status'])}")
+                if cc[2].button("보기", key=f"wlview_{r['sym']}"):
+                    st.session_state.search_symbol = r['sym']
+                    st.session_state.search_query_text = r['sym']
+                    st.rerun()
+            st.caption("관심종목은 주소(URL)에 저장돼요. 이 페이지를 즐겨찾기 하면 다음에도 유지돼요.")
 
     if submitted:
         s = (typed or "").strip()
