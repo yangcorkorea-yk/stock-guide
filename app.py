@@ -605,18 +605,30 @@ def _cached_market():
 
 _mkt = _cached_market()
 if _mkt:
-    # 모바일에서 두 줄로 깨지지 않게 chip 형태로 한 줄에 (자연 wrap 허용)
-    parts = []
+    # 각 항목을 라벨/값/등락 3줄 카드로, 가로 flex로 나열 (모바일에서도 행 유지)
+    items_html = ""
     for m in _mkt:
         pct = m.get("pct") if m.get("pct") is not None else 0
         if pct > 0:
-            tag = f":green[▲{pct:+.2f}%]"
+            color, arrow = "#0a8a3a", "▲"
         elif pct < 0:
-            tag = f":red[▼{pct:+.2f}%]"
+            color, arrow = "#c92a2a", "▼"
         else:
-            tag = f":gray[▪{pct:+.2f}%]"
-        parts.append(f"**{m['label']}** {m['value']} {tag}")
-    st.markdown("　·　".join(parts))
+            color, arrow = "#888", "▪"
+        items_html += (
+            f'<div style="flex:1 1 calc(50% - 8px);min-width:120px;'
+            f'padding:10px 12px;background:rgba(255,255,255,0.04);'
+            f'border-radius:10px;">'
+            f'<div style="font-size:0.85rem;color:#9aa0a6;margin-bottom:4px;">{m["label"]}</div>'
+            f'<div style="font-size:1.4rem;font-weight:600;line-height:1.15;">{m["value"]}</div>'
+            f'<div style="font-size:0.85rem;color:{color};margin-top:4px;font-weight:500;">'
+            f'{arrow}{pct:+.2f}%</div>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:8px;width:100%;">{items_html}</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요.")
 
 
