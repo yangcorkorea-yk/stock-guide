@@ -3,6 +3,6 @@ plotly
 alpaca-py
 pandas
 numpy
-yfinance
+yfinance>=0.2.50,<0.3
 requests
 anthropic
