@@ -12,6 +12,8 @@ import re
 from typing import Optional
 
 DEFAULT_MODEL = "claude-haiku-4-5"
+# 종합 분석은 좀 더 큰 모델로 (속도보다 인사이트 우선)
+DEFAULT_ANALYSIS_MODEL = "claude-sonnet-4-6"
 
 
 def _key() -> Optional[str]:
@@ -29,6 +31,7 @@ def _key() -> Optional[str]:
 
 
 def _model() -> str:
+    """기본 모델 — 뉴스 요약·헤드라인 번역 등 가벼운 작업용."""
     try:
         import streamlit as st
         m = st.secrets.get("ANTHROPIC_MODEL")
@@ -37,6 +40,18 @@ def _model() -> str:
     except Exception:
         pass
     return os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+
+
+def _model_analysis() -> str:
+    """종합 분석 전용 모델. ANTHROPIC_MODEL_ANALYSIS 우선, 없으면 Sonnet."""
+    try:
+        import streamlit as st
+        m = st.secrets.get("ANTHROPIC_MODEL_ANALYSIS")
+        if m:
+            return m
+    except Exception:
+        pass
+    return os.getenv("ANTHROPIC_MODEL_ANALYSIS", DEFAULT_ANALYSIS_MODEL)
 
 
 def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
@@ -129,7 +144,7 @@ def synthesize_analysis_ko(symbol: str, name: Optional[str],
     try:
         client = Anthropic(api_key=key)
         resp = client.messages.create(
-            model=_model(),
+            model=_model_analysis(),  # 종합 분석은 별도 모델 (기본 Sonnet)
             max_tokens=500,
             system=system,
             messages=[{"role": "user", "content": user}],
