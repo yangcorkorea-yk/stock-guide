@@ -615,6 +615,28 @@ def company_brief(symbol):
             info = tk.info or {}
         except Exception:
             info = {}
+
+        # info가 비어있거나 핵심 필드 없으면 fast_info로 폴백 시도
+        # fast_info는 가벼운 엔드포인트라 종종 살아있음 (시총·52주가 등)
+        if not info or not (info.get("sector") or info.get("marketCap")):
+            try:
+                fi = tk.fast_info
+                for src, dst in (("market_cap", "marketCap"),
+                                 ("currency", "currency"),
+                                 ("exchange", "exchange"),
+                                 ("year_high", "fiftyTwoWeekHigh"),
+                                 ("year_low", "fiftyTwoWeekLow"),
+                                 ("last_price", "currentPrice"),
+                                 ("previous_close", "previousClose")):
+                    try:
+                        v = getattr(fi, src, None)
+                        if v is not None and info.get(dst) is None:
+                            info[dst] = v
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         out["name"] = info.get("shortName") or info.get("longName") or symbol
         sec = info.get("sector")
         out["sector"] = _SECTOR_KO.get(sec, sec)
