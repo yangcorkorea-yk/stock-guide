@@ -605,7 +605,7 @@ def _cached_market():
 
 _mkt = _cached_market()
 if _mkt:
-    # 각 항목을 라벨/값/등락 3줄 카드로, 가로 flex로 나열 (모바일에서도 행 유지)
+    # 각 항목: 라벨(위) + 주가·등락(같은 행) + 카드 가운데 정렬
     items_html = ""
     for m in _mkt:
         pct = m.get("pct") if m.get("pct") is not None else 0
@@ -618,11 +618,12 @@ if _mkt:
         items_html += (
             f'<div style="flex:1 1 calc(50% - 8px);min-width:120px;'
             f'padding:10px 12px;background:rgba(255,255,255,0.04);'
-            f'border-radius:10px;">'
+            f'border-radius:10px;text-align:center;">'
             f'<div style="font-size:0.85rem;color:#9aa0a6;margin-bottom:4px;">{m["label"]}</div>'
-            f'<div style="font-size:1.4rem;font-weight:600;line-height:1.15;">{m["value"]}</div>'
-            f'<div style="font-size:0.85rem;color:{color};margin-top:4px;font-weight:500;">'
-            f'{arrow}{pct:+.2f}%</div>'
+            f'<div style="display:flex;justify-content:center;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+            f'<span style="font-size:1.4rem;font-weight:600;line-height:1.15;">{m["value"]}</span>'
+            f'<span style="font-size:0.9rem;color:{color};font-weight:500;">{arrow}{pct:+.2f}%</span>'
+            f'</div>'
             f'</div>'
         )
     st.markdown(
