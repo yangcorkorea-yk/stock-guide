@@ -351,7 +351,7 @@ def show_detail(symbol, df, context=None):
     # 재무 지표 (접이식)
     fund_fields = ["pe", "psr", "pbr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
-        with st.expander("💎 재무 지표 자세히 (PER·PSR·PBR·배당·성장률)"):
+        with st.expander("💎 재무 지표 상세 (PER·PSR·PBR·배당·성장률)"):
             st.caption("회사의 '몸값'과 '돈 버는 힘'이에요. 같은 업종끼리 비교해야 의미 있어요.")
             cols = st.columns(3)
             cols[0].metric("PER", brief.get("pe") or "—",
