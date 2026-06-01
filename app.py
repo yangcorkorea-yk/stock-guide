@@ -605,10 +605,18 @@ def _cached_market():
 
 _mkt = _cached_market()
 if _mkt:
-    cols = st.columns(len(_mkt))
-    for col, m in zip(cols, _mkt):
-        delta = f"{m['pct']:+.2f}%" if m.get("pct") is not None else None
-        col.metric(m["label"], m["value"], delta)
+    # 모바일에서 두 줄로 깨지지 않게 chip 형태로 한 줄에 (자연 wrap 허용)
+    parts = []
+    for m in _mkt:
+        pct = m.get("pct") if m.get("pct") is not None else 0
+        if pct > 0:
+            tag = f":green[▲{pct:+.2f}%]"
+        elif pct < 0:
+            tag = f":red[▼{pct:+.2f}%]"
+        else:
+            tag = f":gray[▪{pct:+.2f}%]"
+        parts.append(f"**{m['label']}** {m['value']} {tag}")
+    st.markdown("　·　".join(parts))
     st.caption("오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요.")
 
 
