@@ -93,6 +93,54 @@ def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
         return None
 
 
+def synthesize_analysis_ko(symbol: str, name: Optional[str],
+                           payload_text: str) -> Optional[str]:
+    """
+    종목의 종합 데이터(가격·기술지표·52주위치·참고가격대·뉴스)를 받아
+    애널리스트 톤으로 한국어 5줄 종합. **예측·매매권유는 금지**.
+    실패/키없음 시 None.
+    """
+    key = _key()
+    if not key or not payload_text:
+        return None
+    try:
+        from anthropic import Anthropic
+    except Exception:
+        return None
+
+    company = name or symbol
+    system = (
+        "당신은 20년 경력의 미국 주식 애널리스트입니다. 초보 투자자에게 "
+        "현재 상황을 쉽고 균형 있게 설명합니다. 반드시 주어진 데이터만 근거로 "
+        "한국어로 정확히 5줄을 작성하세요.\n"
+        "규칙(엄수):\n"
+        "1) 가격 예측·목표가·매수/매도 권유 절대 금지.\n"
+        "2) 긍정 신호와 위험 요인을 균형 있게 짚을 것.\n"
+        "3) 불확실성·데이터 한계를 숨기지 말 것.\n"
+        "4) 회사명은 사용자가 준 이름만 쓰고 지어내지 말 것.\n"
+        "5) 각 줄은 '- '로 시작하는 한 문장. 군더더기 없이 간결하게."
+    )
+    user = (
+        f"종목: {company} (티커 {symbol})\n\n"
+        f"[현재 데이터]\n{payload_text}\n\n"
+        "위 데이터를 종합해 한국어 5줄로 정리하세요. "
+        "각 줄은 '- '로 시작. 예측·추천 없이 '지금 상태'만 균형 있게 설명."
+    )
+    try:
+        client = Anthropic(api_key=key)
+        resp = client.messages.create(
+            model=_model(),
+            max_tokens=500,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(
+            (b.text if hasattr(b, "text") else "") for b in resp.content).strip()
+        return text or None
+    except Exception:
+        return None
+
+
 def translate_headlines_ko(headlines: list[str]) -> Optional[list[str]]:
     """
     영문 헤드라인 리스트를 한국어로 번역해 같은 순서·같은 개수로 반환.
