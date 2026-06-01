@@ -111,6 +111,7 @@ TICKER_NAMES: dict[str, str] = {
     "FAST": "패스널 Fastenal",
     "FCX": "프리포트맥모란 Freeport-McMoRan",
     "FDX": "페덱스 FedEx",
+    "FIG": "피그마 Figma",
     "FOUR": "시프트4페이먼츠 Shift4 Payments",
     "FOXA": "폭스 Fox",
     "FSLR": "퍼스트솔라 First Solar",
