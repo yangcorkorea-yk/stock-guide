@@ -34,6 +34,15 @@ from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
+
+# Plotly 차트 공통 설정: 모바일에서 modebar(툴바)가 legend와 겹쳐 보이는 문제
+# → PC에선 hover 시에만 표시, 모바일/터치에선 숨김. 불필요한 버튼도 제거.
+PLOTLY_CONFIG = {
+    "displayModeBar": False,   # 기본 숨김 (PC는 hover 시 자동 노출 안 되므로 깔끔)
+    "displaylogo": False,
+    "scrollZoom": False,
+}
+
 st.session_state.setdefault("sector_rows", None)
 st.session_state.setdefault("theme_name", None)
 st.session_state.setdefault("search_symbol", None)
@@ -275,7 +284,8 @@ def show_detail(symbol, df, context=None):
                           row=1, col=1, annotation_text="손절 참고", annotation_position="left")
         except Exception:
             levels = None
-    st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{tf}")
+    st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{tf}",
+                    config=PLOTLY_CONFIG)
     st.caption(f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)")
 
     # ── 한 줄 정리 ────────────────────────────
@@ -316,6 +326,11 @@ def show_detail(symbol, df, context=None):
         parts.append(f"**베타** {brief['beta']}")
     if parts:
         st.markdown("　·　".join(parts))
+    else:
+        kn = TICKER_NAMES.get(symbol)
+        st.markdown(f"**{kn}**" if kn else f"**{symbol}**")
+        st.caption("회사 기본정보(업종·시총 등)를 불러오지 못했어요. "
+                   "신규 상장이나 일시적인 데이터 지연일 수 있어요.")
     if context:
         st.caption(f"🏷️ '{context}' 흐름에 속한 종목이에요.")
 
@@ -504,7 +519,8 @@ def render_comparison(symbols, key, default_period="6개월"):
         return
 
     fig, ranking = make_comparison_chart(dfs, lookback_days=days)
-    st.plotly_chart(fig, use_container_width=True, key=f"cmp_chart_{key}_{period}")
+    st.plotly_chart(fig, use_container_width=True, key=f"cmp_chart_{key}_{period}",
+                    config=PLOTLY_CONFIG)
     st.caption("※ 모든 종목을 시작점=100으로 맞춰 겹친 거예요. "
                "선이 위로 갈수록 그 기간 더 올랐다는 뜻이에요.")
 
