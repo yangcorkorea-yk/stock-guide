@@ -150,6 +150,23 @@ def show_detail(symbol, df, context=None):
     st.caption("52주 고점 대비가 0%에 가까울수록 장기 강세 영역, 많이 마이너스면 고점에서 내려온 상태예요. "
                "베타는 시장(1.0)보다 얼마나 더/덜 출렁이는지예요.")
 
+    # 📅 다음 실적 발표 (yfinance.calendar)
+    edate = brief.get("earnings_date")
+    if edate:
+        days = brief.get("earnings_days")
+        eps_part = f"  · 추정 EPS {brief['earnings_eps_est']}" if brief.get("earnings_eps_est") else ""
+        if days is None:
+            st.info(f"📅 다음 실적 발표: **{edate}**{eps_part}")
+        elif days < 0:
+            st.caption(f"📅 직전 실적 발표: {edate} ({-days}일 전)")
+        elif days == 0:
+            st.warning(f"⚠️ **오늘 실적 발표** · {edate}{eps_part}")
+        elif days <= 7:
+            st.warning(f"⚠️ **D-{days} 실적 발표 임박** · {edate}{eps_part}")
+        else:
+            st.info(f"📅 다음 실적 발표: **{edate}** (D-{days}){eps_part}")
+        st.caption("실적 발표는 가격 변동이 큰 이벤트예요. 그날을 알고 들어가요.")
+
     # 📍 그룹(섹터/테마) 내 위치 — context 있을 때만
     if context:
         render_peer_summary(symbol, context)

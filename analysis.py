@@ -543,7 +543,7 @@ def _humanize_cap(v):
 
 
 def company_brief(symbol):
-    """회사 기본정보 + 펀더멘털 + 최근 뉴스. 못 가져온 항목은 None으로 graceful."""
+    """회사 기본정보 + 펀더멘털 + 다음 실적 + 최근 뉴스. 못 가져온 항목은 None으로 graceful."""
     out = {
         "name": symbol, "sector": None, "industry": None,
         "cap": None, "pe": None,
@@ -552,6 +552,9 @@ def company_brief(symbol):
         "div_yield": None, "op_margin": None, "profit_margin": None,
         "rev_growth": None, "earnings_growth": None,
         "roe": None, "beta": None,
+        # 다음 실적
+        "earnings_date": None, "earnings_days": None,
+        "earnings_eps_est": None, "earnings_revenue_est": None,
         "news": [],
     }
     try:
@@ -597,6 +600,37 @@ def company_brief(symbol):
         beta = info.get("beta")
         if isinstance(beta, (int, float)):
             out["beta"] = f"{beta:.2f}"
+
+        # 다음 실적 발표일 (yfinance calendar)
+        try:
+            from datetime import date as _date
+            cal = tk.calendar  # dict 또는 DataFrame일 수 있음
+            edate = None
+            eps_avg = rev_avg = None
+            if isinstance(cal, dict):
+                edate = cal.get("Earnings Date")
+                eps_avg = cal.get("Earnings Average")
+                rev_avg = cal.get("Revenue Average")
+            elif hasattr(cal, "to_dict"):  # DataFrame fallback
+                d = cal.to_dict()
+                edate = d.get("Earnings Date")
+                eps_avg = d.get("Earnings Average")
+                rev_avg = d.get("Revenue Average")
+
+            # 리스트면 첫 원소 (yfinance는 [start, end] 두 날짜를 줄 때가 있음)
+            if isinstance(edate, list) and edate:
+                edate = edate[0]
+            if hasattr(edate, "date"):  # datetime → date
+                edate = edate.date()
+            if isinstance(edate, _date):
+                out["earnings_date"] = str(edate)
+                out["earnings_days"] = (edate - _date.today()).days
+            if isinstance(eps_avg, (int, float)):
+                out["earnings_eps_est"] = f"${eps_avg:.2f}"
+            if isinstance(rev_avg, (int, float)):
+                out["earnings_revenue_est"] = _humanize_cap(rev_avg)
+        except Exception:
+            pass
 
         try:
             raw = tk.news or []
