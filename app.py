@@ -25,7 +25,8 @@ def _looks_like_ticker(s: str) -> bool:
     return bool(s and _TICKER_RE.match(s.upper()))
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
-                      reference_levels, FUNDAMENTALS_HELP, make_comparison_chart)
+                      reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
+                      find_peer_group)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
@@ -168,9 +169,21 @@ def show_detail(symbol, df, context=None):
             st.info(f"📅 다음 실적 발표: **{edate}** (D-{days}){eps_part}")
         st.caption("실적 발표는 가격 변동이 큰 이벤트예요. 그날을 알고 들어가요.")
 
-    # 📍 그룹(섹터/테마) 내 위치 — context 있을 때만
+    # 📍 그룹(섹터/테마) 내 위치
+    # · context 명시(섹터/테마 탭에서 진입) 우선
+    # · 없으면 카탈로그 또는 yfinance industry/sector 로 자동 인식
     if context:
-        render_peer_summary(symbol, context)
+        group_name = context
+        group_peers = _resolve_context_peers(context)
+    else:
+        group_name, group_peers = find_peer_group(
+            symbol, brief.get("industry"), brief.get("sector")
+        )
+    if group_name and group_peers:
+        render_peer_summary(symbol, group_name, group_peers)
+        if len(group_peers) >= 3:
+            with st.expander(f"📊 '{group_name}' 그룹 수익률 비교 ({len(group_peers)}개 겹쳐 보기)"):
+                render_comparison(group_peers, key=f"detail_{symbol}")
 
     # 💎 펀더멘털 (재무 건강)
     fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
@@ -369,25 +382,27 @@ def render_comparison(symbols, key, default_period="6개월"):
         )
 
 
-def render_peer_summary(symbol, context):
-    """현재 종목이 같은 섹터/테마 동료 중 어디쯤인지 한 줄 요약."""
+def _resolve_context_peers(context):
+    """context 문자열을 peer 리스트로 풀어낸다.
+    · 섹터명 → SECTORS[name]
+    · '테마명 · 단계명' → 그 단계의 stocks (없으면 테마 전체)
+    """
     if not context:
-        return
-    peers, pname = None, None
-    # 섹터 직접 매칭
+        return None
     if context in SECTORS:
-        peers, pname = SECTORS[context], context
-    elif " · " in context:
-        # "테마명 · 단계명" 형태
+        return list(SECTORS[context])
+    if " · " in context:
         tname, _, seg_name = context.partition(" · ")
         if tname in THEMES:
             for seg in THEMES[tname]["chain"]:
                 if seg["name"] == seg_name:
-                    peers, pname = seg["stocks"], context
-                    break
-            if not peers:
-                peers = sorted({s for seg in THEMES[tname]["chain"] for s in seg["stocks"]})
-                pname = tname
+                    return list(seg["stocks"])
+            return sorted({s for seg in THEMES[tname]["chain"] for s in seg["stocks"]})
+    return None
+
+
+def render_peer_summary(symbol, group_name, peers):
+    """현재 종목이 동료 그룹에서 3개월 수익률 기준 어디쯤인지 한 줄 요약."""
     if not peers or symbol not in peers or len(peers) < 3:
         return
 
@@ -412,7 +427,7 @@ def render_peer_summary(symbol, context):
 
     arrow = "🟢 평균보다 강함" if rel > 1 else ("🔴 평균보다 약함" if rel < -1 else "⚪ 평균 수준")
     st.markdown(
-        f"📍 **'{pname}'** 내 **{rank}/{len(rets)}위**  ·  "
+        f"📍 **'{group_name}'** 내 **{rank}/{len(rets)}위**  ·  "
         f"3개월 **{my:+.1f}%** (그룹 평균 {avg:+.1f}%, {arrow})"
     )
 
