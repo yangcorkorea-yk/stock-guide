@@ -39,9 +39,12 @@ def _model() -> str:
     return os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
 
-def summarize_news_ko(symbol: str, sector: Optional[str], headlines: list[str]) -> Optional[str]:
+def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
+                      headlines: list[str]) -> Optional[str]:
     """
     헤드라인 리스트를 받아 한국어 3~4줄 요약을 돌려준다.
+    name: 정확한 회사명 힌트 (예: '리게티컴퓨팅 Rigetti Computing'). LLM이
+          회사명을 지어내지 않도록 넘김.
     실패/키없음 시 None.
     """
     key = _key()
@@ -55,17 +58,20 @@ def summarize_news_ko(symbol: str, sector: Optional[str], headlines: list[str]) 
 
     # 헤드라인이 너무 많으면 위에서 잘라 비용 절약
     hl = "\n".join(f"- {h}" for h in headlines[:15] if h)
-    sect = f"(섹터: {sector})" if sector else ""
+    sect = f" · 섹터: {sector}" if sector else ""
+    company = name or symbol
 
     system = (
         "당신은 미국 주식 뉴스를 한국 초보 투자자에게 쉽게 요약하는 도우미입니다. "
         "예측·추천·매수/매도 권유는 절대 하지 않습니다. "
-        "정확하지 않은 정보는 만들지 않습니다."
+        "정확하지 않은 정보는 만들지 않습니다. "
+        "회사명은 반드시 사용자가 알려준 이름만 쓰고, 임의로 지어내지 마세요."
     )
     user = (
-        f"종목: {symbol} {sect}\n\n"
+        f"종목: {company} (티커 {symbol}){sect}\n\n"
         f"최근 뉴스 헤드라인:\n{hl}\n\n"
-        "위 헤드라인들을 종합해 한국어로 3~4줄 요약하세요.\n"
+        f"위 헤드라인들을 종합해 한국어로 3~4줄 요약하세요.\n"
+        f"- 회사명은 '{company}'의 한국어 표기를 그대로 쓰세요 (다른 이름 금지).\n"
         "- 어려운 용어는 풀어서, 초보자가 이해할 수 있게.\n"
         "- 사실만 정리. 가격 예측·매매 권유 금지.\n"
         "- 글머리표 없이 자연스러운 문단으로."
