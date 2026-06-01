@@ -287,7 +287,7 @@ def show_detail(symbol, df, context=None):
         st.markdown(BB_HELP)
 
     # ── AI 종합 분석 ──────────────────────────
-    st.subheader("🤖 AI 종합 분석")
+    st.subheader("✨ AI 종합 분석")
     ai_levels = levels
     if ai_levels is None:
         try:
@@ -300,7 +300,7 @@ def show_detail(symbol, df, context=None):
         ai_text = cached_ai_analysis(symbol, name_hint, payload)
     if ai_text:
         st.markdown(ai_text)
-        st.caption("🤖 AI가 위 데이터를 종합한 거예요. 예측·매매 권유가 아니고, 최종 판단은 본인 몫이에요.")
+        st.caption("✨ AI가 위 데이터를 종합한 거예요. 예측·매매 권유가 아니고, 최종 판단은 본인 몫이에요.")
     else:
         st.caption("AI 분석은 잠시 쉬어가요 (`ANTHROPIC_API_KEY` 미설정 또는 호출 실패).")
 
@@ -351,7 +351,7 @@ def show_detail(symbol, df, context=None):
     # 재무 지표 (접이식)
     fund_fields = ["pe", "psr", "pbr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
-        with st.expander("💎 재무 지표 자세히 (PER·PSR·PBR·배당·성장률)"):
+        with st.expander("💎 재무 지표 상세 (PER·PSR·PBR·배당·성장률)"):
             st.caption("회사의 '몸값'과 '돈 버는 힘'이에요. 같은 업종끼리 비교해야 의미 있어요.")
             cols = st.columns(3)
             cols[0].metric("PER", brief.get("pe") or "—",
@@ -400,23 +400,24 @@ def show_detail(symbol, df, context=None):
             (n.get("headline") or "").strip()
             for n in news_items[:6] if n.get("headline"))
         tr_map = cached_headline_tr(link_titles) if link_titles else {}
-        st.markdown("**🔗 원문 링크**")
-        for n in news_items[:6]:
-            title = (n.get("headline") or "").strip()
-            url = n.get("url") or ""
-            src = n.get("source") or ""
-            if not title:
-                continue
-            ko = tr_map.get(title)
-            shown = ko or title
-            st.markdown(f"- [{shown}]({url})　_{src}_" if url else f"- {shown}　_{src}_")
-            if ko:  # 번역된 경우 원문 제목을 작게 병기
-                st.caption(f"　{title}")
-        if tr_map:
-            st.caption("제목은 AI가 한국어로 옮긴 거예요. 정확한 내용은 원문 링크에서 확인하세요.")
+        with st.expander(f"🔗 원문 링크 ({len(link_titles)}건)"):
+            for n in news_items[:6]:
+                title = (n.get("headline") or "").strip()
+                url = n.get("url") or ""
+                src = n.get("source") or ""
+                if not title:
+                    continue
+                ko = tr_map.get(title)
+                shown = ko or title
+                st.markdown(f"- [{shown}]({url})　_{src}_" if url else f"- {shown}　_{src}_")
+                if ko:  # 번역된 경우 원문 제목을 작게 병기
+                    st.caption(f"　{title}")
+            if tr_map:
+                st.caption("제목은 AI가 한국어로 옮긴 거예요. 정확한 내용은 원문 링크에서 확인하세요.")
     elif fallback_used:
-        for t in headlines:
-            st.markdown(f"- {t}")
+        with st.expander(f"🔗 헤드라인 ({len(headlines)}건)"):
+            for t in headlines:
+                st.markdown(f"- {t}")
 
     # ── 기술적 상태 ───────────────────────────
     st.subheader("📊 기술적 상태")
