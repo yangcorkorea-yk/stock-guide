@@ -259,24 +259,28 @@ def show_detail(symbol, df, context=None):
             st.info(f"📅 다음 실적 발표 **{edate}** (D-{days}){eps_part}")
 
     # 재무 지표 (접이식)
-    fund_fields = ["pe", "psr", "div_yield", "op_margin", "rev_growth", "roe"]
+    fund_fields = ["pe", "psr", "pbr", "div_yield", "op_margin", "rev_growth", "roe"]
     if any(brief.get(k) for k in fund_fields):
-        with st.expander("💎 재무 지표 자세히 (PER·PSR·배당·성장률)"):
+        with st.expander("💎 재무 지표 자세히 (PER·PSR·PBR·배당·성장률)"):
             st.caption("회사의 '몸값'과 '돈 버는 힘'이에요. 같은 업종끼리 비교해야 의미 있어요.")
             cols = st.columns(3)
             cols[0].metric("PER", brief.get("pe") or "—",
                            help="주가 ÷ 1주당 순이익. 적자면 표시 안 돼요.")
             cols[1].metric("PSR", brief.get("psr") or "—",
                            help="주가 ÷ 1주당 매출. 적자·성장주에 유용해요.")
-            cols[2].metric("배당수익률", brief.get("div_yield") or "—",
-                           help="연 배당금 ÷ 주가.")
+            cols[2].metric("PBR", brief.get("pbr") or "—",
+                           help="주가 ÷ 1주당 순자산. 자산 대비 가격.")
             cols2 = st.columns(3)
-            cols2[0].metric("영업이익률", brief.get("op_margin") or "—",
+            cols2[0].metric("배당수익률", brief.get("div_yield") or "—",
+                            help="연 배당금 ÷ 주가.")
+            cols2[1].metric("영업이익률", brief.get("op_margin") or "—",
                             help="매출 100원 중 본업으로 남긴 이익.")
-            cols2[1].metric("매출성장", brief.get("rev_growth") or "—",
-                            help="작년 같은 분기 대비 매출 증감.")
             cols2[2].metric("ROE", brief.get("roe") or "—",
                             help="자기자본 대비 이익률. 15%↑면 보통 우량.")
+            cols3 = st.columns(3)
+            cols3[0].metric("매출성장(YoY)", brief.get("rev_growth") or "—",
+                            help="작년 같은 분기 대비 매출 증감.")
+            st.caption("데이터 출처: Yahoo Finance. 분기 보고서 시차로 한국 증권사 화면과 1~2% 차이 날 수 있어요.")
             st.markdown(FUNDAMENTALS_HELP)
 
     # ── 뉴스 ─────────────────────────────────

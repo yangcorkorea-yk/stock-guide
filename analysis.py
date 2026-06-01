@@ -635,13 +635,25 @@ def company_brief(symbol):
         out["psr"] = _ratio(info.get("priceToSalesTrailing12Months"))
         out["pbr"] = _ratio(info.get("priceToBook"))
 
-        # 배당수익률: yfinance 최근 버전은 percent(2.5=2.5%), 옛 버전은 decimal(0.025).
-        dy = info.get("dividendYield")
-        if isinstance(dy, (int, float)) and dy > 0:
-            pct = dy if dy > 1 else dy * 100
-            out["div_yield"] = f"{pct:.2f}%"
-        elif isinstance(dy, (int, float)):
-            out["div_yield"] = "0%"
+        # 배당수익률: yfinance의 dividendYield 필드는 단위 일관성이 없음
+        # (어떤 종목은 0.0089 = decimal, 어떤 종목은 0.89 = 이미 percent).
+        # 더 안정적인 방법: dividendRate / currentPrice 로 직접 계산.
+        div_rate = (info.get("dividendRate")
+                    or info.get("trailingAnnualDividendRate"))
+        price = (info.get("currentPrice")
+                 or info.get("regularMarketPrice")
+                 or info.get("previousClose"))
+        if (isinstance(div_rate, (int, float)) and div_rate > 0
+                and isinstance(price, (int, float)) and price > 0):
+            out["div_yield"] = f"{(div_rate / price) * 100:.2f}%"
+        else:
+            # 폴백: dividendYield 필드 (1보다 작으면 decimal, 크면 이미 percent로 가정)
+            dy = info.get("dividendYield")
+            if isinstance(dy, (int, float)) and dy > 0:
+                pct = dy * 100 if dy < 1 else dy
+                out["div_yield"] = f"{pct:.2f}%"
+            elif isinstance(dy, (int, float)):
+                out["div_yield"] = "0%"
 
         out["op_margin"] = _pct(info.get("operatingMargins"))
         out["profit_margin"] = _pct(info.get("profitMargins"))
