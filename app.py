@@ -29,7 +29,7 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
-from macro_calendar import upcoming_events
+from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 st.session_state.setdefault("sector_rows", None)
@@ -478,10 +478,22 @@ if _events:
             st.markdown(f"- **{e['date']}** ({d_label})  ·  {e['tag']}  **{e['name']}**")
             if e.get("desc"):
                 st.caption(f"　　{e['desc']}")
-        st.caption("⚠️ FOMC·CPI·PCE 일정은 패턴 기반 추정치예요. 실제 발표일은 "
-                   "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
-                   "[BLS](https://www.bls.gov/schedule/news_release/) · "
-                   "[BEA](https://www.bea.gov/news/schedule) 공식 캘린더에서 확인하세요.")
+        meta = get_macro_meta()
+        last = meta.get("last_refresh")
+        fails = meta.get("refresh_failures") or []
+        if last:
+            tag = f"자동 갱신: {last[:10]}"
+            if fails:
+                tag += f"  ·  ⚠️ 일부 소스 추출 실패: {', '.join(fails)}"
+            st.caption(tag + "  ·  출처: "
+                       "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
+                       "[BLS](https://www.bls.gov/schedule/news_release/) · "
+                       "[BEA](https://www.bea.gov/news/schedule)")
+        else:
+            st.caption("⚠️ 일정은 패턴 기반 추정치예요. 실제 발표일은 "
+                       "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
+                       "[BLS](https://www.bls.gov/schedule/news_release/) · "
+                       "[BEA](https://www.bea.gov/news/schedule) 공식 캘린더에서 확인하세요.")
 
 
 tab1, tab2, tab3, tab4 = st.tabs(

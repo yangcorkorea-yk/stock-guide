@@ -81,6 +81,18 @@ def _load_curated() -> list[dict]:
         return []
 
 
+def get_meta() -> dict:
+    """큐레이션 JSON의 메타데이터 (last_refresh, refresh_failures 등)."""
+    try:
+        data = json.loads(CURATED_PATH.read_text(encoding="utf-8"))
+        return {
+            "last_refresh": data.get("last_refresh"),
+            "refresh_failures": data.get("refresh_failures", []),
+        }
+    except Exception:
+        return {}
+
+
 def upcoming_events(days: int = 30, today: Optional[date] = None) -> list[dict]:
     """
     오늘부터 N일 내 거시 이벤트를 날짜 순으로 반환.
