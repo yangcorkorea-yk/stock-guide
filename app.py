@@ -29,6 +29,7 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
+from macro_calendar import upcoming_events
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 st.session_state.setdefault("sector_rows", None)
@@ -444,6 +445,44 @@ def render_theme_detail(tname):
 
 st.title("📈 종목 길잡이")
 st.caption("미국주식 초보자를 위한 '지금 이 종목, 어떤 상태?' 도구")
+
+
+# ── 거시 이벤트 캘린더 (모든 탭 위 상단에 노출) ─────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_macro(days):
+    return upcoming_events(days=days)
+
+
+_events = _cached_macro(30)
+if _events:
+    nearest = _events[0]
+    d_until = nearest.get("days_until")
+    if d_until is not None and d_until == 0:
+        d_str = "오늘"
+    elif d_until is not None and d_until <= 7:
+        d_str = f"D-{d_until}"
+    else:
+        d_str = f"D-{d_until}" if d_until is not None else ""
+    label = f"📅 다가오는 시장 이벤트 — {nearest['tag']} {nearest['name']} ({d_str})"
+    with st.expander(label):
+        for e in _events:
+            d = e.get("days_until")
+            if d is None:
+                d_label = "?"
+            elif d == 0:
+                d_label = "**오늘**"
+            elif d < 0:
+                d_label = f"{-d}일 전"
+            else:
+                d_label = f"D-{d}"
+            st.markdown(f"- **{e['date']}** ({d_label})  ·  {e['tag']}  **{e['name']}**")
+            if e.get("desc"):
+                st.caption(f"　　{e['desc']}")
+        st.caption("⚠️ FOMC·CPI·PCE 일정은 패턴 기반 추정치예요. 실제 발표일은 "
+                   "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
+                   "[BLS](https://www.bls.gov/schedule/news_release/) · "
+                   "[BEA](https://www.bea.gov/news/schedule) 공식 캘린더에서 확인하세요.")
+
 
 tab1, tab2, tab3, tab4 = st.tabs(
     ["🔍 종목 검색", "📂 섹터 탐색", "📂 테마 탐색", "🔥 뜨는 테마"]
