@@ -28,7 +28,8 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context)
 from news_client import fetch_news
-from llm_client import summarize_news_ko, translate_headlines_ko
+from llm_client import (summarize_news_ko, translate_headlines_ko,
+                        synthesize_analysis_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
@@ -158,16 +159,79 @@ def analyze_tickers(tickers):
     return rows
 
 
-def _range_bar_52w(df):
-    """52주 레인지에서 현재가 위치를 막대로 시각화."""
+def _pos_52w(df):
+    """52주 (lo, hi, cur, pos) 반환. 데이터 부족 시 None."""
     closes = df['close'].tail(252).dropna()
     if len(closes) < 20:
-        return
+        return None
     lo, hi, cur = float(closes.min()), float(closes.max()), float(closes.iloc[-1])
     if hi <= lo:
+        return None
+    return lo, hi, cur, max(0.0, min(1.0, (cur - lo) / (hi - lo)))
+
+
+def _range_bar_52w(df):
+    """52주 레인지에서 현재가 위치를 막대로 시각화."""
+    p = _pos_52w(df)
+    if not p:
         return
-    pos = max(0.0, min(1.0, (cur - lo) / (hi - lo)))
+    lo, hi, _cur, pos = p
     st.progress(pos, text=f"52주 위치 {pos*100:.0f}%　·　최저 ${lo:,.0f} ~ 최고 ${hi:,.0f}")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_ai_analysis(symbol, name, payload_text):
+    """AI 종합 분석 캐시 (1시간). payload_text가 캐시 키 역할."""
+    return synthesize_analysis_ko(symbol, name, payload_text)
+
+
+def _build_ai_payload(symbol, df, info, brief, levels):
+    """AI 종합 분석에 넘길 데이터 텍스트 구성. 값은 라운딩해 캐시 안정화."""
+    lines = []
+    # 가격/상태
+    lines.append(f"현재가 ${info['close']:.2f} (전일대비 {info['change']:+.1f}%), "
+                 f"상태 '{info['status']}', {info['trend']}")
+    # 52주 위치
+    p = _pos_52w(df)
+    if p:
+        lo, hi, _cur, pos = p
+        lines.append(f"52주 위치 {pos*100:.0f}% (최저 ${lo:,.0f} ~ 최고 ${hi:,.0f})")
+    # 기술 지표
+    tech = f"RSI(과열도) {info['rsi']:.0f}, 볼린저밴드 위치 {info['bb']:.2f}"
+    if info.get('rvol') is not None:
+        tech += f", 거래량 평균의 {info['rvol']:.1f}배(IEX 부분피드 한계 있음)"
+    lines.append(tech)
+    # 회사 기본
+    comp = []
+    if brief.get("sector"):
+        comp.append(f"업종 {brief['sector']}" + (f"·{brief['industry']}" if brief.get('industry') else ""))
+    if brief.get("cap"):
+        comp.append(f"시총 {brief['cap']}")
+    for k, label in (("pe", "PER"), ("psr", "PSR"), ("roe", "ROE"),
+                     ("rev_growth", "매출성장"), ("div_yield", "배당")):
+        if brief.get(k):
+            comp.append(f"{label} {brief[k]}")
+    if comp:
+        lines.append(" · ".join(comp))
+    # 실적
+    if brief.get("earnings_date"):
+        d = brief.get("earnings_days")
+        lines.append(f"다음 실적 발표 {brief['earnings_date']}" + (f" (D-{d})" if isinstance(d, int) and d >= 0 else ""))
+    # 참고 가격대
+    if levels:
+        lines.append(f"참고가격(규칙계산) 진입 ${levels['entry'][0]['price']:.0f} / "
+                     f"매도 ${levels['exit'][0]['price']:.0f} / 손절 ${levels['stop'][0]['price']:.0f}")
+    # 최근 뉴스 헤드라인
+    try:
+        news = cached_news(symbol)
+        hl = [(n.get("headline") or "").strip() for n in news[:5] if n.get("headline")]
+        if not hl and brief.get("news"):
+            hl = list(brief["news"])
+        if hl:
+            lines.append("최근 뉴스 헤드라인: " + " / ".join(hl))
+    except Exception:
+        pass
+    return "\n".join(lines)
 
 
 def show_detail(symbol, df, context=None):
@@ -221,6 +285,24 @@ def show_detail(symbol, df, context=None):
         st.markdown(RSI_HELP)
         st.divider()
         st.markdown(BB_HELP)
+
+    # ── AI 종합 분석 ──────────────────────────
+    st.subheader("🤖 AI 종합 분석")
+    ai_levels = levels
+    if ai_levels is None:
+        try:
+            ai_levels = reference_levels(df)
+        except Exception:
+            ai_levels = None
+    payload = _build_ai_payload(symbol, df, info, brief, ai_levels)
+    name_hint = TICKER_NAMES.get(symbol) or brief.get("name") or symbol
+    with st.spinner("AI가 종합하는 중..."):
+        ai_text = cached_ai_analysis(symbol, name_hint, payload)
+    if ai_text:
+        st.markdown(ai_text)
+        st.caption("🤖 AI가 위 데이터를 종합한 거예요. 예측·매매 권유가 아니고, 최종 판단은 본인 몫이에요.")
+    else:
+        st.caption("AI 분석은 잠시 쉬어가요 (`ANTHROPIC_API_KEY` 미설정 또는 호출 실패).")
 
     # ── 회사 ─────────────────────────────────
     st.subheader("🏢 이 회사는")
