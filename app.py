@@ -121,9 +121,9 @@ def cached_news(symbol, days=5, limit=20):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def cached_news_summary(symbol, sector, headlines_tuple):
+def cached_news_summary(symbol, name, sector, headlines_tuple):
     """LLM 요약 캐시 (1시간). headlines를 튜플로 받아 캐시 키 안정화."""
-    return summarize_news_ko(symbol, sector, list(headlines_tuple))
+    return summarize_news_ko(symbol, name, sector, list(headlines_tuple))
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -295,7 +295,8 @@ def show_detail(symbol, df, context=None):
         fallback_used = True
 
     if headlines:
-        summary = cached_news_summary(symbol, brief.get("sector"), headlines)
+        name_hint = TICKER_NAMES.get(symbol) or brief.get("name") or symbol
+        summary = cached_news_summary(symbol, name_hint, brief.get("sector"), headlines)
         if summary:
             st.markdown(summary)
             st.caption("AI가 헤드라인을 요약한 거예요. 자세한 내용은 원문을 확인해 주세요.")
@@ -674,8 +675,6 @@ with tab2:
         name = st.session_state.sector_name
         st.write(f"**{name}** 대표 종목 현재 상태")
         render_stock_table(st.session_state.sector_rows, f"sector_{name}", context=name)
-        with st.expander(f"📊 섹터 종목 수익률 비교 ({len(SECTORS[name])}개 겹쳐 보기)"):
-            render_comparison(SECTORS[name], key=f"sector_{name}")
 
 # ── 탭 3: 테마 탐색 ──────────────────────────────
 with tab3:
