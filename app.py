@@ -115,8 +115,10 @@ def cached_bars_long(symbol):
     return get_bars(symbol, days=1800)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def cached_brief(symbol):
+    # yfinance는 종종 일시 장애(Yahoo 측 변경/차단)로 빈 결과를 줌.
+    # TTL을 10분으로 짧게 → 빈 결과가 들어와도 다음 호출(10분 내)에 재시도.
     return company_brief(symbol)
 
 

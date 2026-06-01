@@ -707,8 +707,12 @@ def company_brief(symbol):
             if t:
                 titles.append(t)
         out["news"] = titles[:2]
-    except Exception:
-        pass
+    except Exception as e:
+        # yfinance 일시 장애·차단·필드 변경 등을 Streamlit Cloud 로그에서
+        # 진단할 수 있게 stderr에 짧게 기록 (사용자 노출 X).
+        import sys
+        print(f"[company_brief] {symbol} 실패: {type(e).__name__}: {e}",
+              file=sys.stderr)
     return out
 
 
