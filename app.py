@@ -28,7 +28,7 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context)
 from news_client import fetch_news
-from llm_client import summarize_news_ko
+from llm_client import summarize_news_ko, translate_headlines_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
@@ -95,6 +95,15 @@ def cached_news(symbol, days=5, limit=20):
 def cached_news_summary(symbol, sector, headlines_tuple):
     """LLM 요약 캐시 (1시간). headlines를 튜플로 받아 캐시 키 안정화."""
     return summarize_news_ko(symbol, sector, list(headlines_tuple))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_headline_tr(headlines_tuple):
+    """뉴스 제목 한국어 번역 캐시 (1시간). 헤드라인 튜플 → {원문: 번역}."""
+    tr = translate_headlines_ko(list(headlines_tuple))
+    if not tr or len(tr) != len(headlines_tuple):
+        return {}
+    return dict(zip(headlines_tuple, tr))
 
 
 def badge(status):
@@ -257,6 +266,10 @@ def show_detail(symbol, df, context=None):
         st.caption("최근 뉴스를 불러오지 못했어요.")
 
     if news_items:
+        link_titles = tuple(
+            (n.get("headline") or "").strip()
+            for n in news_items[:6] if n.get("headline"))
+        tr_map = cached_headline_tr(link_titles) if link_titles else {}
         st.markdown("**🔗 원문 링크**")
         for n in news_items[:6]:
             title = (n.get("headline") or "").strip()
@@ -264,7 +277,13 @@ def show_detail(symbol, df, context=None):
             src = n.get("source") or ""
             if not title:
                 continue
-            st.markdown(f"- [{title}]({url})　_{src}_" if url else f"- {title}　_{src}_")
+            ko = tr_map.get(title)
+            shown = ko or title
+            st.markdown(f"- [{shown}]({url})　_{src}_" if url else f"- {shown}　_{src}_")
+            if ko:  # 번역된 경우 원문 제목을 작게 병기
+                st.caption(f"　{title}")
+        if tr_map:
+            st.caption("제목은 AI가 한국어로 옮긴 거예요. 정확한 내용은 원문 링크에서 확인하세요.")
     elif fallback_used:
         for t in headlines:
             st.markdown(f"- {t}")

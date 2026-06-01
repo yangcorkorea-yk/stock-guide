@@ -8,6 +8,7 @@ LLM 요약 클라이언트 — Anthropic Claude (기본: claude-haiku-4-5).
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional
 
 DEFAULT_MODEL = "claude-haiku-4-5"
@@ -82,5 +83,53 @@ def summarize_news_ko(symbol: str, sector: Optional[str], headlines: list[str]) 
             (block.text if hasattr(block, "text") else "") for block in resp.content
         ).strip()
         return text or None
+    except Exception:
+        return None
+
+
+def translate_headlines_ko(headlines: list[str]) -> Optional[list[str]]:
+    """
+    영문 헤드라인 리스트를 한국어로 번역해 같은 순서·같은 개수로 반환.
+    실패/키없음 시 None. (요약과 별도로 원문 링크 제목 번역용)
+    """
+    key = _key()
+    if not key or not headlines:
+        return None
+    try:
+        from anthropic import Anthropic
+    except Exception:
+        return None
+
+    items = [h for h in headlines[:8] if h]
+    if not items:
+        return None
+    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(items))
+    user = (
+        "다음 영문 뉴스 제목들을 한국어로 자연스럽게 번역하세요.\n"
+        "- 회사명·티커·고유명사는 그대로 두거나 통용 한글표기.\n"
+        "- 각 줄을 '번호. 번역' 형식으로, 입력과 같은 개수·순서로.\n"
+        "- 의역하되 과장 금지. 다른 설명 없이 번역 목록만.\n\n"
+        f"{numbered}"
+    )
+    try:
+        client = Anthropic(api_key=key)
+        resp = client.messages.create(
+            model=_model(),
+            max_tokens=600,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(
+            (b.text if hasattr(b, "text") else "") for b in resp.content).strip()
+        # '1. ...' 형식 파싱
+        out = []
+        for line in text.splitlines():
+            line = line.strip()
+            m = re.match(r"^\d+[\.\)]\s*(.+)$", line)
+            if m:
+                out.append(m.group(1).strip())
+        if len(out) == len(items):
+            return out
+        # 개수 안 맞으면 안전하게 포기
+        return None
     except Exception:
         return None
