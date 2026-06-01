@@ -1,57 +1,140 @@
 {
-  "notes": "미국 거시지표 발표 일정 — FOMC(Fed) · CPI/PPI(BLS) · PCE/GDP(BEA). 패턴 기반 추정치이며, 정확한 일정은 Fed/BLS/BEA 공식 캘린더에서 분기마다 확인·갱신해 주세요.",
+  "notes": "미국 거시지표 발표 일정 — Fed/BLS/BEA 공식 페이지에서 자동 추출 (월 1회 GH Actions).",
   "source_links": {
     "FOMC": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
     "BLS": "https://www.bls.gov/schedule/news_release/",
     "BEA": "https://www.bea.gov/news/schedule"
   },
+  "last_refresh": "2026-06-01T01:12:07Z",
+  "refresh_failures": [
+    "CPI"
+  ],
   "events": [
-    {"date": "2026-01-13", "name": "12월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS). 인플레이션 핵심."},
-    {"date": "2026-01-28", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 파월 기자회견."},
-    {"date": "2026-01-29", "name": "4Q '25 GDP 속보치", "tag": "📈 GDP", "desc": "BEA 분기별 GDP 속보치."},
-    {"date": "2026-01-30", "name": "12월 PCE 발표", "tag": "💵 PCE", "desc": "Fed가 가장 중시하는 인플레 지표 (BEA)."},
-
-    {"date": "2026-02-11", "name": "1월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-02-27", "name": "1월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-03-11", "name": "2월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-03-18", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 점도표(SEP) 갱신."},
-    {"date": "2026-03-27", "name": "2월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-04-10", "name": "3월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-04-29", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 기자회견."},
-    {"date": "2026-04-29", "name": "1Q '26 GDP 속보치", "tag": "📈 GDP", "desc": "BEA 분기별 GDP 속보치."},
-    {"date": "2026-04-30", "name": "3월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-05-12", "name": "4월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-05-29", "name": "4월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-06-10", "name": "5월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-06-17", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 점도표(SEP) 갱신."},
-    {"date": "2026-06-26", "name": "5월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-07-14", "name": "6월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-07-29", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 기자회견."},
-    {"date": "2026-07-30", "name": "2Q '26 GDP 속보치", "tag": "📈 GDP", "desc": "BEA 분기별 GDP 속보치."},
-    {"date": "2026-07-31", "name": "6월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-08-12", "name": "7월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-08-28", "name": "7월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-09-10", "name": "8월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-09-16", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 점도표(SEP) 갱신."},
-    {"date": "2026-09-25", "name": "8월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-10-14", "name": "9월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-10-28", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "Fed 기준금리 결정 + 기자회견."},
-    {"date": "2026-10-29", "name": "3Q '26 GDP 속보치", "tag": "📈 GDP", "desc": "BEA 분기별 GDP 속보치."},
-    {"date": "2026-10-30", "name": "9월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-11-12", "name": "10월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-11-25", "name": "10월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."},
-
-    {"date": "2026-12-10", "name": "11월 CPI 발표", "tag": "📊 CPI", "desc": "소비자물가지수 (BLS)."},
-    {"date": "2026-12-16", "name": "FOMC 정례회의", "tag": "🏦 FOMC", "desc": "올해 마지막 — Fed 기준금리 결정 + 점도표(SEP)."},
-    {"date": "2026-12-23", "name": "11월 PCE 발표", "tag": "💵 PCE", "desc": "개인소비지출 물가 (BEA)."}
+    {
+      "date": "2026-06-10",
+      "name": "5월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-06-17",
+      "name": "FOMC 정례회의",
+      "tag": "🏦 FOMC",
+      "desc": "경제 예측자료 포함"
+    },
+    {
+      "date": "2026-06-25",
+      "name": "5월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    },
+    {
+      "date": "2026-07-14",
+      "name": "6월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-07-29",
+      "name": "FOMC 정례회의",
+      "tag": "🏦 FOMC",
+      "desc": ""
+    },
+    {
+      "date": "2026-07-30",
+      "name": "6월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    },
+    {
+      "date": "2026-07-30",
+      "name": "2분기 GDP 속보치",
+      "tag": "📈 GDP",
+      "desc": "2026년 2분기 국내총생산(GDP) 속보치 발표"
+    },
+    {
+      "date": "2026-08-12",
+      "name": "7월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-08-26",
+      "name": "7월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    },
+    {
+      "date": "2026-09-10",
+      "name": "8월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-09-16",
+      "name": "FOMC 정례회의",
+      "tag": "🏦 FOMC",
+      "desc": "경제 예측자료 포함"
+    },
+    {
+      "date": "2026-09-30",
+      "name": "8월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    },
+    {
+      "date": "2026-10-14",
+      "name": "9월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-10-28",
+      "name": "FOMC 정례회의",
+      "tag": "🏦 FOMC",
+      "desc": ""
+    },
+    {
+      "date": "2026-10-29",
+      "name": "9월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    },
+    {
+      "date": "2026-10-29",
+      "name": "3분기 GDP 속보치",
+      "tag": "📈 GDP",
+      "desc": "2026년 3분기 국내총생산(GDP) 속보치 발표"
+    },
+    {
+      "date": "2026-11-12",
+      "name": "10월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-11-25",
+      "name": "10월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    },
+    {
+      "date": "2026-12-09",
+      "name": "FOMC 정례회의",
+      "tag": "🏦 FOMC",
+      "desc": "경제 예측자료 포함"
+    },
+    {
+      "date": "2026-12-10",
+      "name": "11월 CPI 발표",
+      "tag": "📊 CPI",
+      "desc": "소비자물가지수 (BLS)."
+    },
+    {
+      "date": "2026-12-23",
+      "name": "11월 개인소비지출 발표",
+      "tag": "💵 PCE",
+      "desc": "개인소득 및 지출 통계 발표"
+    }
   ]
 }
