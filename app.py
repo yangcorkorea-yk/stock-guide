@@ -211,7 +211,7 @@ def show_detail(symbol, df, context=None):
                           row=1, col=1, annotation_text="손절 참고", annotation_position="left")
         except Exception:
             levels = None
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{tf}")
     st.caption(f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)")
 
     # ── 회사 ─────────────────────────────────
@@ -420,7 +420,7 @@ def render_comparison(symbols, key, default_period="6개월"):
         return
 
     fig, ranking = make_comparison_chart(dfs, lookback_days=days)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"cmp_chart_{key}_{period}")
     st.caption("※ 모든 종목을 시작점=100으로 맞춰 겹친 거예요. "
                "선이 위로 갈수록 그 기간 더 올랐다는 뜻이에요.")
 
