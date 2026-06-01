@@ -283,6 +283,57 @@ def make_comparison_chart(symbols_to_df: dict, lookback_days: int = 126):
     return fig, sorted(final_vals, key=lambda x: -x[1])
 
 
+def market_context():
+    """
+    시장 전반 컨텍스트 — 오늘 변동률.
+    · SPY(S&P500), QQQ(나스닥100): Alpaca 일봉 (안정적)
+    · VIX(공포지수), USD/KRW(환율): yfinance (실패 시 생략, graceful)
+    반환: [{label, value, pct, kind}, ...]  (못 받은 항목은 제외)
+    kind: 'index'면 pct를 등락률로, 'level'이면 절대값 위주.
+    """
+    out = []
+
+    def _alpaca_change(sym, label):
+        try:
+            df = get_bars(sym, days=10)
+            if df is None or len(df) < 2:
+                return None
+            close = float(df['close'].iloc[-1])
+            prev = float(df['close'].iloc[-2])
+            return {"label": label, "value": f"{close:,.2f}",
+                    "pct": (close / prev - 1) * 100, "kind": "index"}
+        except Exception:
+            return None
+
+    for sym, label in (("SPY", "S&P500"), ("QQQ", "나스닥100")):
+        r = _alpaca_change(sym, label)
+        if r:
+            out.append(r)
+
+    # VIX·환율은 yfinance (지수/환율은 Alpaca 무료 플랜에 없음)
+    try:
+        import yfinance as yf
+        data = yf.download("^VIX KRW=X", period="5d", interval="1d",
+                           progress=False, threads=True, auto_adjust=True)
+        for tk, label, kind in (("^VIX", "공포지수(VIX)", "level"),
+                                ("KRW=X", "환율(원/$)", "level")):
+            try:
+                series = data[tk]["Close"].dropna()
+            except Exception:
+                series = None
+            if series is None or len(series) < 2:
+                continue
+            cur = float(series.iloc[-1])
+            prev = float(series.iloc[-2])
+            fmt = f"{cur:,.1f}" if kind == "level" else f"{cur:,.2f}"
+            out.append({"label": label, "value": fmt,
+                        "pct": (cur / prev - 1) * 100, "kind": kind})
+    except Exception:
+        pass
+
+    return out
+
+
 def resample_bars(df, tf):
     """일봉 df를 주봉('W')/월봉('M')으로 합침. 그 외는 일봉 그대로."""
     if tf not in ("W", "M"):

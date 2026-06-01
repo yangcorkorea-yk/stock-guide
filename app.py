@@ -26,7 +26,7 @@ def _looks_like_ticker(s: str) -> bool:
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
-                      find_peer_group)
+                      find_peer_group, market_context)
 from news_client import fetch_news
 from llm_client import summarize_news_ko
 from ticker_names import search_tickers, display_name, TICKER_NAMES
@@ -453,6 +453,21 @@ def render_theme_detail(tname):
 
 st.title("📈 종목 길잡이")
 st.caption("미국주식 초보자를 위한 '지금 이 종목, 어떤 상태?' 도구")
+
+
+# ── 시장 컨텍스트 바 (모든 탭 위 상단) ───────────────
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_market():
+    return market_context()
+
+
+_mkt = _cached_market()
+if _mkt:
+    cols = st.columns(len(_mkt))
+    for col, m in zip(cols, _mkt):
+        delta = f"{m['pct']:+.2f}%" if m.get("pct") is not None else None
+        col.metric(m["label"], m["value"], delta)
+    st.caption("오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요.")
 
 
 # ── 거시 이벤트 캘린더 (모든 탭 위 상단에 노출) ─────────
