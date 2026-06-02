@@ -171,11 +171,12 @@ def synthesize_analysis_ko(symbol: str, name: Optional[str],
         return None
 
 
-def compare_stocks_ko(items: list[dict]) -> Optional[str]:
+def compare_stocks_ko(items: list[dict]) -> Optional[dict]:
     """
-    여러 종목 데이터를 비교해 한국어 분석 텍스트 반환.
-    items: [{"symbol": "NVDA", "name": "엔비디아", "data": "..."}, ...]
-    반환: 마크다운 (표 + 종합 단락). 실패/키없음 시 None.
+    종목 비교 분석 — 시각화를 위해 JSON 반환.
+    items: [{"symbol", "name", "data"}]
+    반환: {"comparison": [{symbol, name, strengths[], weaknesses[], investor_type}], "insight": str}
+    실패/키없음 시 None.
     """
     key = _key()
     if not key or len(items) < 2:
@@ -192,38 +193,44 @@ def compare_stocks_ko(items: list[dict]) -> Optional[str]:
 
     system = (
         "당신은 20년 경력의 미국 주식 애널리스트입니다. "
-        "한국 초보 투자자에게 여러 종목을 균형 있게 비교해 설명합니다.\n"
+        "한국 초보 투자자에게 종목을 균형 있게 비교해 설명합니다.\n"
         "규칙(엄수):\n"
         "1) 가격 예측·목표가·매수/매도 권유 절대 금지.\n"
-        "2) 강점·약점·리스크를 균형 있게 짚을 것.\n"
-        "3) 주어진 데이터에 없는 사실은 만들지 말 것.\n"
-        "4) 회사명은 입력한 한국어 이름만 사용.\n"
-        "5) 큰 제목·헤더(# ##) 절대 금지."
+        "2) 강점·약점·리스크를 균형 있게.\n"
+        "3) 주어진 데이터에 없는 사실 금지.\n"
+        "4) 회사명은 입력 한국어만 사용.\n"
+        "5) JSON만 출력. 다른 설명·마크다운·코드펜스 금지."
     )
     user = (
-        f"다음 {len(items)}개 종목을 비교 분석해 주세요.\n\n"
+        f"다음 {len(items)}개 종목을 비교 분석해 JSON으로만 응답하세요.\n\n"
         f"{payload}\n\n"
-        "다음 형식으로만 작성:\n\n"
-        "**📋 한눈에 비교**\n"
-        "| 종목 | 강점 | 약점 | 어울리는 투자자 |\n"
-        "|---|---|---|---|\n"
-        "| (한국어이름) | 핵심 강점 1~2개 | 핵심 약점·리스크 1~2개 | 성향 (예: 성장 / 가치 / 배당) |\n"
-        "...(각 종목 한 줄)\n\n"
-        "**💡 종합 인사이트**\n"
-        "3~5줄 한국어 단락. 공통점·차이점·시장 위치를 균형 있게. "
-        "예측·추천 금지. 큰 제목 금지. 자연스러운 문단."
+        "스키마:\n"
+        '{"comparison":[{"symbol":"티커","name":"한국어 회사명",'
+        '"strengths":["짧은 강점 구문 1","강점 2"],'
+        '"weaknesses":["짧은 약점/리스크 1","약점 2"],'
+        '"investor_type":"어울리는 투자자 성향 (예: 성장 추구, 가치 투자, 배당 선호, 공격적 성장)"},'
+        '...],"insight":"한국어 종합 인사이트 3~5줄, 공통점/차이점/리스크 균형. '
+        "예측·추천 금지. 자연스러운 문단."
+        '"}'
+        "\n\n각 strengths/weaknesses는 2~3개. 짧은 명사구·서술 (10~20자 권장)."
     )
     try:
         client = Anthropic(api_key=key)
         resp = client.messages.create(
             model=_model_analysis(),
-            max_tokens=1500,
+            max_tokens=2000,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
-        text = _strip_headers(text)
-        return text or None
+        import json as _json
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            return None
+        try:
+            return _json.loads(m.group(0))
+        except Exception:
+            return None
     except Exception:
         return None
 

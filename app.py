@@ -955,41 +955,88 @@ with tab4:
 
 # ── 탭 5: 종목 비교 AI ──────────────────────────
 with tab5:
-    st.write("**2~3개 종목**을 비교해 강점·약점·어울리는 투자자 성향을 AI가 정리해 줘요.")
-    st.caption("예측·매수·매도 권유가 아니에요. 정보 비교 도구로만 쓰세요.")
+    st.write("종목을 **검색해서 비교함에 담아** AI 분석을 받아요. (최대 3개)")
+    st.caption("예측·매수·매도 권유가 아니에요. 정보 비교용.")
 
-    st.session_state.setdefault("compare_input", "")
+    st.session_state.setdefault("compare_basket", [])
+    st.session_state.setdefault("compare_run", False)
+    basket = st.session_state.compare_basket
 
-    # 관심종목 빠른 채우기 (있을 때만)
-    _wl_for_compare = get_watchlist()
-    if _wl_for_compare:
-        _wl_default = ", ".join(_wl_for_compare[:3])
-        if st.button(f"⭐ 관심종목으로 자동 채우기 ({_wl_default})",
-                     use_container_width=True, key="compare_fill_wl"):
-            st.session_state.compare_input = _wl_default
-            st.rerun()
+    # 검색 입력
+    query = st.text_input(
+        "회사명(한국어/영문) 또는 티커",
+        placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
+        key="compare_search",
+    ).strip()
 
-    with st.form("compare_form", clear_on_submit=False):
-        typed = st.text_input(
-            "종목 (콤마로 구분, 2~3개)",
-            value=st.session_state.get("compare_input", ""),
-            placeholder="예: NVDA, AMD, AVGO",
-            key="compare_typed",
+    # 후보 표시 + 토글
+    if query:
+        qu = query.upper()
+        seen, candidates = set(), []
+        if qu in TICKER_NAMES:
+            candidates.append((qu, TICKER_NAMES[qu]))
+            seen.add(qu)
+        for tk, name in search_tickers(query, limit=8):
+            if tk not in seen:
+                candidates.append((tk, name))
+                seen.add(tk)
+        if not candidates and _looks_like_ticker(qu):
+            candidates = [(qu, qu)]
+
+        if candidates:
+            st.caption("👇 후보를 톡 누르면 비교함에 담기/빼기")
+            cols = st.columns(min(len(candidates), 4))
+            for i, (tk, name) in enumerate(candidates[:8]):
+                col = cols[i % len(cols)]
+                short = name.split()[0] if name != tk else tk
+                in_basket = tk in basket
+                btn_label = f"✓ {short}" if in_basket else f"＋ {short}"
+                if col.button(btn_label, key=f"cand_{tk}",
+                              use_container_width=True):
+                    if in_basket:
+                        basket.remove(tk)
+                    elif len(basket) >= 3:
+                        st.warning("최대 3개까지 담을 수 있어요.")
+                    else:
+                        basket.append(tk)
+                    st.rerun()
+        else:
+            st.info(f"'{query}'와 비슷한 종목을 못 찾았어요.")
+
+    # 비교함
+    if basket:
+        chips_html = ""
+        for s in basket:
+            display = TICKER_NAMES.get(s, s).split()[0] if s in TICKER_NAMES else s
+            chips_html += (
+                f'<span style="display:inline-block;padding:6px 14px;margin:4px 4px 0 0;'
+                f'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);'
+                f'border-radius:18px;font-size:0.9rem;font-weight:500;">'
+                f'{display} <span style="opacity:0.7;font-size:0.8rem;">({s})</span></span>'
+            )
+        st.markdown(
+            f"**🧺 비교함** &nbsp; <span style='opacity:0.6;font-size:0.8rem;'>"
+            f"{len(basket)}/3</span>",
+            unsafe_allow_html=True,
         )
-        submitted = st.form_submit_button("⚖️ 비교 분석",
-                                          use_container_width=True, type="primary")
+        st.markdown(f'<div style="margin-bottom:8px;">{chips_html}</div>',
+                    unsafe_allow_html=True)
+        st.caption("위 후보 버튼을 다시 눌러 빼거나, 새로 검색해 더 담을 수 있어요.")
 
-    if submitted:
-        st.session_state.compare_input = (typed or "").strip()
+        if len(basket) >= 2:
+            if st.button("⚖️ 비교 분석 시작", use_container_width=True,
+                         type="primary", key="compare_run_btn"):
+                st.session_state.compare_run = True
+        else:
+            st.info("종목을 **1개 더** 담아주세요 (최소 2개).")
+    else:
+        st.caption("📭 비교함이 비어있어요. 위에서 종목을 검색해 담아주세요.")
 
-    raw = st.session_state.get("compare_input", "")
-    syms = [s.strip().upper() for s in raw.split(",") if s.strip()][:3]
-
-    if len(syms) >= 2:
-        with st.spinner(f"{len(syms)}개 종목 데이터 모으는 중..."):
-            items = []
-            failed = []
-            for s in syms:
+    # 결과 (카드 그리드 + 인사이트 박스)
+    if st.session_state.compare_run and len(basket) >= 2:
+        with st.spinner(f"{len(basket)}개 종목 데이터 모으는 중..."):
+            items, failed = [], []
+            for s in basket:
                 payload = _build_compare_payload(s)
                 if payload:
                     kn = TICKER_NAMES.get(s, s)
@@ -999,26 +1046,75 @@ with tab5:
                     failed.append(s)
 
         if failed:
-            st.warning(f"데이터를 못 가져온 종목: {', '.join(failed)} (시세 부족 또는 비상장 가능)")
+            st.warning(f"데이터를 못 가져온 종목: {', '.join(failed)}")
 
         if len(items) >= 2:
-            with st.spinner("AI가 비교 분석 중..."):
+            with st.spinner("✨ AI가 비교 분석 중..."):
                 result = cached_compare(
                     tuple(it["symbol"] for it in items),
                     tuple(it["name"] for it in items),
                     tuple(it["data"] for it in items),
                 )
-            if result:
-                title_parts = [it["name"] + " (" + it["symbol"] + ")" for it in items]
-                st.markdown("### " + " vs ".join(title_parts))
-                st.markdown(result)
-                st.caption("✨ AI 비교 분석 — 예측·매매 권유가 아닙니다. 정보 참고용.")
+            if result and result.get("comparison"):
+                # 종목 카드 그리드
+                cards_html = ""
+                for c in result["comparison"]:
+                    name = c.get("name", "")
+                    sym = c.get("symbol", "")
+                    strengths = "".join(
+                        f'<li style="margin-bottom:4px;">{s}</li>'
+                        for s in (c.get("strengths") or [])
+                    )
+                    weaknesses = "".join(
+                        f'<li style="margin-bottom:4px;">{w}</li>'
+                        for w in (c.get("weaknesses") or [])
+                    )
+                    inv = c.get("investor_type", "—")
+                    cards_html += (
+                        f'<div style="flex:1 1 calc(50% - 8px);min-width:260px;'
+                        f'padding:16px;background:rgba(255,255,255,0.04);'
+                        f'border:1px solid rgba(99,102,241,0.2);border-radius:12px;">'
+                        f'<div style="font-size:1.15rem;font-weight:700;margin-bottom:12px;'
+                        f'padding-bottom:8px;border-bottom:2px solid rgba(99,102,241,0.3);">'
+                        f'{name} <span style="font-size:0.85rem;opacity:0.6;">({sym})</span></div>'
+                        f'<div style="font-size:0.8rem;color:#10b981;margin-bottom:6px;'
+                        f'font-weight:700;letter-spacing:0.03em;">✅ 강점</div>'
+                        f'<ul style="margin:0 0 14px 18px;padding:0;font-size:0.9rem;'
+                        f'line-height:1.5;">{strengths or "<li>—</li>"}</ul>'
+                        f'<div style="font-size:0.8rem;color:#ef4444;margin-bottom:6px;'
+                        f'font-weight:700;letter-spacing:0.03em;">⚠️ 약점·리스크</div>'
+                        f'<ul style="margin:0 0 14px 18px;padding:0;font-size:0.9rem;'
+                        f'line-height:1.5;">{weaknesses or "<li>—</li>"}</ul>'
+                        f'<div style="padding:8px 12px;background:rgba(59,130,246,0.12);'
+                        f'border-radius:8px;font-size:0.85rem;">'
+                        f'<span style="opacity:0.7;">🎯 어울리는 투자자</span><br>'
+                        f'<strong style="color:#3b82f6;">{inv}</strong></div>'
+                        f'</div>'
+                    )
+                st.markdown(
+                    f'<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;">'
+                    f'{cards_html}</div>',
+                    unsafe_allow_html=True,
+                )
+
+                insight = (result.get("insight") or "").strip().replace("\n", "<br>")
+                if insight:
+                    st.markdown(
+                        f'<div style="padding:16px 20px;margin-top:14px;'
+                        f'background:linear-gradient(135deg,rgba(99,102,241,0.10),'
+                        f'rgba(168,85,247,0.06));'
+                        f'border-left:4px solid #6366f1;border-radius:10px;">'
+                        f'<div style="font-size:0.8rem;color:#6366f1;margin-bottom:8px;'
+                        f'font-weight:700;letter-spacing:0.03em;">💡 종합 인사이트</div>'
+                        f'<div style="font-size:0.95rem;line-height:1.75;">{insight}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                st.caption("✨ AI 비교 분석 — 예측·매매 권유가 아니에요. 정보 참고용.")
             else:
                 st.caption("AI 분석 실패 (ANTHROPIC_API_KEY 미설정 또는 호출 실패).")
         elif not failed:
             st.info("비교 가능한 종목 데이터가 부족해요.")
-    elif raw:
-        st.info("종목을 **2~3개** 콤마로 구분해 입력해 주세요 (예: `NVDA, AMD`).")
 
 st.divider()
 st.caption("⚠️ 이 앱은 투자조언이 아니며 정보·교육 목적입니다. "
