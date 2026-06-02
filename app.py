@@ -343,10 +343,12 @@ def render_sector_heatmap():
     )
     rows = ""
     for r in data:
+        n_html = (f' <span style="opacity:0.4;font-size:0.72rem;">({r.get("n", 0)})</span>'
+                  if r.get("n") else "")
         row = (
             f'<td style="padding:9px 10px;font-weight:500;white-space:nowrap;'
             f'overflow:hidden;text-overflow:ellipsis;">'
-            f'{r["name"]} <span style="opacity:0.45;font-size:0.78rem;">({r["symbol"]})</span></td>'
+            f'{r["name"]}{n_html}</td>'
         )
         for k in ("w1", "m1", "m3"):
             v = r.get(k)
@@ -376,8 +378,8 @@ def render_sector_heatmap():
         f'{head}{rows}</table>',
         unsafe_allow_html=True,
     )
-    st.caption("11개 GICS 섹터 ETF · 3개월 수익률 강한 순 · 색이 진할수록 큰 변동 "
-               "(초록=상승, 빨강=하락).")
+    st.caption("우리 카탈로그 22개 섹터 · 3개월 수익률 강한 순 · 각 그룹 종목 동일 가중 평균. "
+               "괄호 안은 평균에 쓰인 종목 수. 색이 진할수록 큰 변동 (초록=상승, 빨강=하락).")
 
 
 def render_earnings_cards(earnings: list[dict]):
