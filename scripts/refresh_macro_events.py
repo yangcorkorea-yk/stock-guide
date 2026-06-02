@@ -36,6 +36,12 @@ SOURCES = [
         "what": "월별 소비자물가지수(CPI) 발표일",
     },
     {
+        "key": "PPI",
+        "url": "https://www.bls.gov/schedule/news_release/ppi.htm",
+        "tag": "📈 PPI",
+        "what": "월별 생산자물가지수(PPI) 발표일 (BLS, 보통 CPI 다음날)",
+    },
+    {
         "key": "PCE",
         "url": "https://www.bea.gov/news/schedule",
         "tag": "💵 PCE",

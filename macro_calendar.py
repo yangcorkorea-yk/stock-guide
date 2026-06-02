@@ -37,6 +37,26 @@ def _first_friday(year: int, month: int) -> date:
     return d
 
 
+def _first_weekday(year: int, month: int, weekday: int) -> date:
+    """그 달 첫 weekday(월=0, 화=1, 수=2, ..., 일=6)."""
+    d = date(year, month, 1)
+    while d.weekday() != weekday:
+        d += timedelta(days=1)
+    return d
+
+
+def _nth_business_day(year: int, month: int, n: int) -> date:
+    """그 달 N번째 영업일 (월~금)."""
+    d = date(year, month, 1)
+    bdays = 0
+    while True:
+        if d.weekday() < 5:
+            bdays += 1
+            if bdays == n:
+                return d
+        d += timedelta(days=1)
+
+
 def _auto_events(start: date, end: date) -> list[dict]:
     """규칙 기반 이벤트. start ~ end 범위 (inclusive)."""
     events: list[dict] = []
@@ -65,6 +85,46 @@ def _auto_events(start: date, end: date) -> list[dict]:
                 "name": "고용보고서 (NFP) 발표",
                 "tag": "💼 NFP",
                 "desc": "비농업 고용·실업률 (BLS). 시장 방향에 영향 큰 지표."
+            })
+
+        # ADP 민간고용: 매월 첫째 수요일 (NFP 미니 프리뷰)
+        fw = _first_weekday(y, m, 2)
+        if start <= fw <= end:
+            events.append({
+                "date": str(fw),
+                "name": "ADP 민간고용 발표",
+                "tag": "👥 ADP",
+                "desc": "민간기업 신규 고용. NFP 이틀 전 발표돼 시장이 '맛보기'로 본다."
+            })
+
+        # ISM 제조업 PMI: 매월 첫째 영업일
+        ism_m = _nth_business_day(y, m, 1)
+        if start <= ism_m <= end:
+            events.append({
+                "date": str(ism_m),
+                "name": "ISM 제조업 PMI",
+                "tag": "🏭 ISM",
+                "desc": "제조업 경기지수 (50↑ 확장 / 50↓ 위축). 경기 선행 지표."
+            })
+
+        # ISM 서비스업 PMI: 매월 셋째 영업일
+        ism_s = _nth_business_day(y, m, 3)
+        if start <= ism_s <= end:
+            events.append({
+                "date": str(ism_s),
+                "name": "ISM 서비스업 PMI",
+                "tag": "🛎️ ISM",
+                "desc": "서비스업 경기지수. 미국 경제의 70%를 차지."
+            })
+
+        # JOLTS 구인·이직: 매월 첫째 화요일 (BLS 일정 추정)
+        ft = _first_weekday(y, m, 1)
+        if start <= ft <= end:
+            events.append({
+                "date": str(ft),
+                "name": "JOLTS 구인·이직 보고서",
+                "tag": "📋 JOLTS",
+                "desc": "구인 건수·이직률 (BLS). 노동시장 강도 지표."
             })
         if m == 12:
             y, m = y + 1, 1
