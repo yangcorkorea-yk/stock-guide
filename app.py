@@ -95,6 +95,7 @@ def toggle_watch(symbol):
 
 HOT_THEMES_PATH = Path(__file__).resolve().parent / "data" / "hot_themes.json"
 BRIEFING_PATH = Path(__file__).resolve().parent / "data" / "market_briefing.json"
+EVENT_BRIEFING_PATH = Path(__file__).resolve().parent / "data" / "event_briefings.json"
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -111,6 +112,15 @@ def load_market_briefing():
     """data/market_briefing.json (GH Actions가 매일 갱신). 없으면 None."""
     try:
         return json.loads(BRIEFING_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_event_briefings():
+    """data/event_briefings.json — 최근 거시 이벤트 발표 브리핑들."""
+    try:
+        return json.loads(EVENT_BRIEFING_PATH.read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -708,6 +718,47 @@ if _brief and _brief.get("briefing"):
         f'<div style="font-size:0.95rem;line-height:1.7;margin-top:12px;">{_bd}</div>'
         f'<div style="font-size:0.72rem;opacity:0.6;margin-top:10px;">'
         f'기준일 {_md} · AI 분석 · 예측·매매 권유 아님</div>'
+        f'</details>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── 거시 이벤트 5분 브리핑 (FOMC/CPI 등 발표 다음날 자동) ──
+_evs_data = load_event_briefings()
+_evs_list = (_evs_data or {}).get("event_briefings") or []
+for _ev in _evs_list[:2]:  # 가장 최근 2건까지 노출
+    _eh = (_ev.get("headline") or "").strip()
+    _esum = (_ev.get("summary") or "").strip().replace("\n", "<br>")
+    _emr = (_ev.get("market_reaction") or "").strip().replace("\n", "<br>")
+    _esec = _ev.get("sectors_affected") or []
+    _edate = _ev.get("date", "")
+    _etag = _ev.get("tag", "")
+    _ename = _ev.get("event_name", "")
+    _sec_html = "".join(
+        f'<li style="margin-bottom:3px;">{s}</li>' for s in _esec
+    )
+    st.markdown(
+        f'<details style="padding:14px 18px;'
+        f'background:linear-gradient(135deg,rgba(245,158,11,0.10),rgba(239,68,68,0.05));'
+        f'border-left:4px solid #f59e0b;border-radius:10px;margin-bottom:14px;">'
+        f'<summary style="list-style:none;cursor:pointer;outline:none;">'
+        f'<div style="font-size:0.78rem;color:#f59e0b;margin-bottom:4px;'
+        f'letter-spacing:0.02em;font-weight:600;">🎯 5분 브리핑 · {_etag} · {_edate}　'
+        f'<span style="font-size:0.7rem;opacity:0.6;">▾ 펼치기</span></div>'
+        f'<div style="font-size:1.1rem;font-weight:700;line-height:1.4;">'
+        f'{_ename}: {_eh}</div>'
+        f'</summary>'
+        f'<div style="font-size:0.95rem;line-height:1.7;margin-top:12px;">{_esum}</div>'
+        + (f'<div style="font-size:0.85rem;margin-top:10px;padding:8px 12px;'
+           f'background:rgba(0,0,0,0.06);border-radius:6px;">'
+           f'<strong style="color:#3b82f6;">📊 시장 반응</strong><br>{_emr}</div>'
+           if _emr else '')
+        + (f'<div style="margin-top:10px;"><strong style="color:#10b981;font-size:0.85rem;">'
+           f'🏷️ 영향 받은 섹터·테마</strong><ul style="margin:6px 0 0 18px;'
+           f'font-size:0.9rem;line-height:1.5;">{_sec_html}</ul></div>'
+           if _esec else '')
+        + f'<div style="font-size:0.72rem;opacity:0.6;margin-top:12px;">'
+        f'AI 분석 · 예측·매매 권유 아님</div>'
         f'</details>',
         unsafe_allow_html=True,
     )

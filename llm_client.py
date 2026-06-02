@@ -235,6 +235,67 @@ def compare_stocks_ko(items: list[dict]) -> Optional[dict]:
         return None
 
 
+def synthesize_event_briefing_ko(event: dict, market_text: str,
+                                  headlines: list[str]) -> Optional[dict]:
+    """
+    거시 이벤트(FOMC/CPI/PCE/GDP/NFP) 발표 다음날 5분 브리핑.
+    event: {date, name, tag}
+    market_text: 시장 반응 텍스트 (지수·VIX 변동률)
+    headlines: 발표 전후 뉴스 헤드라인 리스트
+    반환: {headline, summary, market_reaction, sectors_affected[]}
+    """
+    key = _key()
+    if not key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except Exception:
+        return None
+
+    hl_block = "\n".join(f"- {h}" for h in headlines[:20] if h)
+    system = (
+        "당신은 20년 경력의 미국 매크로 애널리스트입니다. "
+        "거시지표(FOMC/CPI/PCE/GDP/고용보고서) 발표 결과를 한국 초보 투자자에게 "
+        "쉽게 설명합니다.\n"
+        "규칙(엄수):\n"
+        "1) 가격 예측·목표가·매수/매도 권유 절대 금지.\n"
+        "2) 발표 결과 숫자는 헤드라인에서 명시적으로 확인된 것만 사용 — 추측 금지.\n"
+        "3) 시장 반응은 주어진 데이터에 근거.\n"
+        "4) JSON만 출력. 다른 설명·마크다운·코드펜스 금지."
+    )
+    user = (
+        f"이벤트: {event.get('name')} ({event.get('date')})\n"
+        f"태그: {event.get('tag')}\n\n"
+        f"[발표 다음날 시장 반응]\n{market_text}\n\n"
+        f"[발표 전후 뉴스 헤드라인]\n{hl_block}\n\n"
+        "JSON 스키마로만 응답:\n"
+        '{"headline":"15~25자 한국어 핵심 한 줄 (예: 「CPI 예상 부합, 시장 안도」)",'
+        '"summary":"발표 결과 요약 2~3문장. 헤드라인에서 확인된 구체 숫자(전년대비 %, 컨센서스 비교)와 그 의미.",'
+        '"market_reaction":"시장 반응 1~2문장. 지수·VIX 변동률 인용.",'
+        '"sectors_affected":["영향 받은 섹터/테마 2~3개, 각각 한 줄 (예: 「AI·빅테크 강세」, 「금리민감 성장주 상승」)"]}'
+        "\n\n예측·매매 권유 절대 금지. 모르는 수치 만들지 말 것."
+    )
+    try:
+        client = Anthropic(api_key=key)
+        resp = client.messages.create(
+            model=_model_analysis(),
+            max_tokens=1200,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
+        import json as _json
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            return None
+        try:
+            return _json.loads(m.group(0))
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 def translate_headlines_ko(headlines: list[str]) -> Optional[list[str]]:
     """
     영문 헤드라인 리스트를 한국어로 번역해 같은 순서·같은 개수로 반환.
