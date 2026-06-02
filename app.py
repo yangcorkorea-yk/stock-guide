@@ -33,7 +33,7 @@ from llm_client import (summarize_news_ko, translate_headlines_ko,
                         synthesize_analysis_ko, compare_stocks_ko,
                         compare_kr_us_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
-from macro_calendar import upcoming_events, get_meta as get_macro_meta
+from macro_calendar import upcoming_events, get_meta as get_macro_meta, get_tag_info
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 
@@ -1051,6 +1051,7 @@ if _events:
         d_str = f"D-{d_until}" if d_until is not None else ""
     label = f"📅 다가오는 시장 이벤트 — {nearest['tag']} {nearest['name']} ({d_str})"
     with st.expander(label):
+        st.caption("각 이벤트를 톡 누르면 의미·해석을 볼 수 있어요.")
         for e in _events:
             d = e.get("days_until")
             if d is None:
@@ -1061,9 +1062,66 @@ if _events:
                 d_label = f"{-d}일 전"
             else:
                 d_label = f"D-{d}"
-            st.markdown(f"- **{e['date']}** ({d_label})  ·  {e['tag']}  **{e['name']}**")
+            tag_info = get_tag_info(e.get("tag", ""))
+            est_mark = (' <span style="font-size:0.72rem;color:#f59e0b;'
+                        'background:rgba(245,158,11,0.12);padding:1px 6px;'
+                        'border-radius:6px;">추정</span>'
+                        if e.get("is_estimate") else "")
+            # summary 1줄 + 펼치면 상세 해석
+            summary_html = (
+                f'<summary style="cursor:pointer;list-style:none;'
+                f'padding:8px 0;border-bottom:1px solid rgba(127,127,127,0.15);">'
+                f'<span style="opacity:0.7;font-size:0.85rem;">{e["date"]}</span>　'
+                f'<span style="font-weight:600;color:#6366f1;">({d_label})</span>　'
+                f'{e.get("tag","")}　'
+                f'<span style="font-weight:600;">{e.get("name","")}</span>'
+                f'{est_mark}'
+                f'</summary>'
+            )
+            body_parts = []
             if e.get("desc"):
-                st.caption(f"　　{e['desc']}")
+                body_parts.append(
+                    f'<div style="font-size:0.88rem;margin-top:8px;line-height:1.6;">'
+                    f'{e["desc"]}</div>'
+                )
+            if tag_info.get("what"):
+                body_parts.append(
+                    f'<div style="margin-top:8px;font-size:0.88rem;line-height:1.6;">'
+                    f'<strong style="color:#6366f1;">📖 무엇인가요</strong><br>'
+                    f'{tag_info["what"]}</div>'
+                )
+            if tag_info.get("high") or tag_info.get("low"):
+                body_parts.append(
+                    f'<div style="margin-top:8px;font-size:0.85rem;line-height:1.6;">'
+                    f'<div><strong style="color:#10b981;">📈 예상보다 높을 때</strong><br>'
+                    f'{tag_info.get("high","—")}</div>'
+                    f'<div style="margin-top:4px;">'
+                    f'<strong style="color:#ef4444;">📉 예상보다 낮을 때</strong><br>'
+                    f'{tag_info.get("low","—")}</div></div>'
+                )
+            if tag_info.get("watch"):
+                body_parts.append(
+                    f'<div style="margin-top:8px;padding:8px 12px;'
+                    f'background:rgba(99,102,241,0.06);border-radius:6px;'
+                    f'font-size:0.85rem;line-height:1.6;">'
+                    f'<strong style="color:#6366f1;">👀 함께 봐야 할 것</strong><br>'
+                    f'{tag_info["watch"]}</div>'
+                )
+            if e.get("is_estimate"):
+                body_parts.append(
+                    f'<div style="margin-top:8px;padding:6px 10px;'
+                    f'background:rgba(245,158,11,0.08);border-radius:6px;'
+                    f'font-size:0.78rem;color:#a16207;">'
+                    f'⚠️ 이 일정은 패턴 기반 <strong>추정</strong>이에요. '
+                    f'기관(BLS·ADP·ISM)이 실제 발표일을 정하기 때문에 ±수일 차이 있을 수 있어요.'
+                    f'</div>'
+                )
+            st.markdown(
+                f'<details>{summary_html}'
+                f'<div style="padding:8px 4px 14px 4px;">{"".join(body_parts)}</div>'
+                f'</details>',
+                unsafe_allow_html=True,
+            )
         meta = get_macro_meta()
         last = meta.get("last_refresh")
         fails = meta.get("refresh_failures") or []
