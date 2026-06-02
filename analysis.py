@@ -602,6 +602,43 @@ def _humanize_cap_millions(v):
     return _humanize_cap(v)
 
 
+def upcoming_earnings_for_symbols(symbols: list, days: int = 30) -> list[dict]:
+    """
+    주어진 종목 중 향후 N일 안에 실적 발표 예정인 항목 (Finnhub 기준).
+    반환: [{symbol, date, days_until, eps_estimate, revenue_estimate, hour, quarter, year}, ...]
+    가까운 순 정렬.
+    """
+    from datetime import date as _date
+    try:
+        from finnhub_client import get_next_earnings
+    except Exception:
+        return []
+    today = _date.today()
+    out = []
+    for s in symbols:
+        try:
+            er = get_next_earnings(s)
+            if not er or not er.get("date"):
+                continue
+            edate = _date.fromisoformat(er["date"])
+            d = (edate - today).days
+            if not (0 <= d <= days):
+                continue
+            out.append({
+                "symbol": s,
+                "date": er["date"],
+                "days_until": d,
+                "eps_estimate": er.get("epsEstimate"),
+                "revenue_estimate": er.get("revenueEstimate"),
+                "hour": (er.get("hour") or "").lower(),
+                "quarter": er.get("quarter"),
+                "year": er.get("year"),
+            })
+        except Exception:
+            continue
+    return sorted(out, key=lambda x: x["days_until"])
+
+
 def _apply_finnhub(out: dict, symbol: str) -> bool:
     """Finnhub에서 데이터를 받아 out에 채운다. 1건이라도 채웠으면 True."""
     try:
