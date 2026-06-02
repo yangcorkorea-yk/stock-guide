@@ -115,10 +115,11 @@ def cached_bars_long(symbol):
     return get_bars(symbol, days=1800)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def cached_brief(symbol):
-    # yfinance는 종종 일시 장애(Yahoo 측 변경/차단)로 빈 결과를 줌.
-    # TTL을 10분으로 짧게 → 빈 결과가 들어와도 다음 호출(10분 내)에 재시도.
+    # Yahoo가 Streamlit Cloud IP를 rate limit하는 경우가 잦음.
+    # 빈 결과여도 1시간 캐시로 호출 빈도를 줄여 차단 회복을 돕는다.
+    # 회복되면 다음 1시간 슬롯에서 새 결과가 들어옴.
     return company_brief(symbol)
 
 
@@ -257,7 +258,7 @@ def show_detail(symbol, df, context=None):
 
     in_wl = symbol in get_watchlist()
     if st.button("⭐ 관심종목에서 빼기" if in_wl else "☆ 관심종목에 담기",
-                 key=f"wl_{symbol}_{context}", use_container_width=True):
+                 key=f"wl_{symbol}_{context}", width="stretch"):
         toggle_watch(symbol)
         st.rerun()
 
@@ -286,7 +287,7 @@ def show_detail(symbol, df, context=None):
                           row=1, col=1, annotation_text="손절 참고", annotation_position="left")
         except Exception:
             levels = None
-    st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{tf}",
+    st.plotly_chart(fig, width="stretch", key=f"chart_{symbol}_{tf}",
                     config=PLOTLY_CONFIG)
     st.caption(f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)")
 
@@ -499,7 +500,7 @@ def render_stock_table(rows, key, context=None):
         "시세": f"${r['price']:.2f}  {r['chg']:+.1f}%",
         "상태": badge(r['status']),
     } for r in rows])
-    event = st.dataframe(table, hide_index=True, use_container_width=True,
+    event = st.dataframe(table, hide_index=True, width="stretch",
                          on_select="rerun", selection_mode="single-row", key=f"tbl_{key}")
     sel = event.selection.rows
     if sel:
@@ -532,7 +533,7 @@ def render_comparison(symbols, key, default_period="6개월"):
         return
 
     fig, ranking = make_comparison_chart(dfs, lookback_days=days)
-    st.plotly_chart(fig, use_container_width=True, key=f"cmp_chart_{key}_{period}",
+    st.plotly_chart(fig, width="stretch", key=f"cmp_chart_{key}_{period}",
                     config=PLOTLY_CONFIG)
     st.caption("※ 모든 종목을 시작점=100으로 맞춰 겹친 거예요. "
                "선이 위로 갈수록 그 기간 더 올랐다는 뜻이에요.")
@@ -726,7 +727,7 @@ with tab1:
             placeholder="예: 엔비디아, NVDA, 애플, 테슬라",
             key="search_typed",
         )
-        submitted = st.form_submit_button("🔍 검색", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("🔍 검색", width="stretch", type="primary")
 
     # 관심종목 (URL에 저장됨)
     _wl = get_watchlist()
@@ -797,7 +798,7 @@ with tab2:
     sector = st.pills("섹터 선택", list(SECTORS.keys()), selection_mode="single",
                       default=list(SECTORS.keys())[0], label_visibility="collapsed",
                       key="sector_sel")
-    if st.button("이 섹터 종목 보기", use_container_width=True, type="primary", key="sector_btn"):
+    if st.button("이 섹터 종목 보기", width="stretch", type="primary", key="sector_btn"):
         if not sector:
             st.warning("먼저 섹터를 선택해 주세요.")
         else:
@@ -817,7 +818,7 @@ with tab3:
     theme = st.pills("테마 선택", list(THEMES.keys()), selection_mode="single",
                      default=list(THEMES.keys())[0], label_visibility="collapsed",
                      key="theme_sel")
-    if st.button("이 테마 살펴보기", use_container_width=True, type="primary", key="theme_btn"):
+    if st.button("이 테마 살펴보기", width="stretch", type="primary", key="theme_btn"):
         if not theme:
             st.warning("먼저 테마를 선택해 주세요.")
         else:
@@ -854,7 +855,7 @@ with tab4:
             table = pd.DataFrame(rows)
             st.caption("👇 테마를 선택하면 아래에 상세가 펼쳐져요")
             event = st.dataframe(
-                table, hide_index=True, use_container_width=True,
+                table, hide_index=True, width="stretch",
                 on_select="rerun", selection_mode="single-row", key="tbl_hot",
             )
             sel = event.selection.rows
