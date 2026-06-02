@@ -29,7 +29,7 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       find_peer_group, market_context)
 from news_client import fetch_news
 from llm_client import (summarize_news_ko, translate_headlines_ko,
-                        synthesize_analysis_ko)
+                        synthesize_analysis_ko, compare_stocks_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
@@ -254,6 +254,50 @@ def _build_ai_payload(symbol, df, info, brief, levels):
     except Exception:
         pass
     return "\n".join(lines)
+
+
+def _build_compare_payload(symbol):
+    """비교용 단일 종목 데이터 텍스트. 데이터 부족 시 None."""
+    df = cached_bars(symbol)
+    if df is None or len(df) < 20:
+        return None
+    info = analyze(df)
+    brief = cached_brief(symbol)
+    lines = [f"- 현재가 ${info['close']:.2f} ({info['change']:+.1f}%), {info['status']}, {info['trend']}"]
+    # 3개월 수익률
+    c = df['close'].tail(64).dropna()
+    if len(c) > 1:
+        ret3m = (c.iloc[-1] / c.iloc[0] - 1) * 100
+        lines.append(f"- 3개월 수익률 {ret3m:+.1f}%")
+    p = _pos_52w(df)
+    if p:
+        lo, hi, _cur, pos = p
+        lines.append(f"- 52주 위치 {pos*100:.0f}% (${lo:,.0f}~${hi:,.0f})")
+    if brief.get('sector') or brief.get('industry'):
+        sec = brief.get('sector') or ''
+        ind = brief.get('industry') or ''
+        lines.append(f"- 업종 {sec} / {ind}".rstrip(" /"))
+    if brief.get('cap'):
+        lines.append(f"- 시총 {brief['cap']}")
+    for k, label in (('pe', 'PER'), ('psr', 'PSR'), ('pbr', 'PBR'),
+                     ('roe', 'ROE'), ('op_margin', '영업이익률'),
+                     ('rev_growth', '매출성장'), ('div_yield', '배당'),
+                     ('beta', '베타')):
+        if brief.get(k):
+            lines.append(f"- {label} {brief[k]}")
+    if brief.get('earnings_date'):
+        d = brief.get('earnings_days')
+        ex = f" (D-{d})" if isinstance(d, int) and d >= 0 else ""
+        lines.append(f"- 다음 실적 발표 {brief['earnings_date']}{ex}")
+    return "\n".join(lines)
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def cached_compare(symbols_tuple, names_tuple, data_tuple):
+    """종목 비교 캐시 (6시간). 같은 조합은 LLM 재호출 X."""
+    items = [{"symbol": s, "name": n, "data": d}
+             for s, n, d in zip(symbols_tuple, names_tuple, data_tuple)]
+    return compare_stocks_ko(items)
 
 
 def show_detail(symbol, df, context=None):
@@ -754,8 +798,8 @@ if _events:
                        "[BEA](https://www.bea.gov/news/schedule) 공식 캘린더에서 확인하세요.")
 
 
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["🔍 종목 검색", "📂 섹터 탐색", "📂 테마 탐색", "🔥 뜨는 테마"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🔍 검색", "📂 섹터", "📂 테마", "🔥 뜨는", "⚖️ 비교"]
 )
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
@@ -908,6 +952,73 @@ with tab4:
                     render_theme_detail(picked)
                 else:
                     st.error("이 테마가 현재 카탈로그에 없어요 (데이터가 더 오래되었을 수 있어요).")
+
+# ── 탭 5: 종목 비교 AI ──────────────────────────
+with tab5:
+    st.write("**2~3개 종목**을 비교해 강점·약점·어울리는 투자자 성향을 AI가 정리해 줘요.")
+    st.caption("예측·매수·매도 권유가 아니에요. 정보 비교 도구로만 쓰세요.")
+
+    st.session_state.setdefault("compare_input", "")
+
+    # 관심종목 빠른 채우기 (있을 때만)
+    _wl_for_compare = get_watchlist()
+    if _wl_for_compare:
+        _wl_default = ", ".join(_wl_for_compare[:3])
+        if st.button(f"⭐ 관심종목으로 자동 채우기 ({_wl_default})",
+                     use_container_width=True, key="compare_fill_wl"):
+            st.session_state.compare_input = _wl_default
+            st.rerun()
+
+    with st.form("compare_form", clear_on_submit=False):
+        typed = st.text_input(
+            "종목 (콤마로 구분, 2~3개)",
+            value=st.session_state.get("compare_input", ""),
+            placeholder="예: NVDA, AMD, AVGO",
+            key="compare_typed",
+        )
+        submitted = st.form_submit_button("⚖️ 비교 분석",
+                                          use_container_width=True, type="primary")
+
+    if submitted:
+        st.session_state.compare_input = (typed or "").strip()
+
+    raw = st.session_state.get("compare_input", "")
+    syms = [s.strip().upper() for s in raw.split(",") if s.strip()][:3]
+
+    if len(syms) >= 2:
+        with st.spinner(f"{len(syms)}개 종목 데이터 모으는 중..."):
+            items = []
+            failed = []
+            for s in syms:
+                payload = _build_compare_payload(s)
+                if payload:
+                    kn = TICKER_NAMES.get(s, s)
+                    name = kn.split()[0] if s in TICKER_NAMES else s
+                    items.append({"symbol": s, "name": name, "data": payload})
+                else:
+                    failed.append(s)
+
+        if failed:
+            st.warning(f"데이터를 못 가져온 종목: {', '.join(failed)} (시세 부족 또는 비상장 가능)")
+
+        if len(items) >= 2:
+            with st.spinner("AI가 비교 분석 중..."):
+                result = cached_compare(
+                    tuple(it["symbol"] for it in items),
+                    tuple(it["name"] for it in items),
+                    tuple(it["data"] for it in items),
+                )
+            if result:
+                title_parts = [it["name"] + " (" + it["symbol"] + ")" for it in items]
+                st.markdown("### " + " vs ".join(title_parts))
+                st.markdown(result)
+                st.caption("✨ AI 비교 분석 — 예측·매매 권유가 아닙니다. 정보 참고용.")
+            else:
+                st.caption("AI 분석 실패 (ANTHROPIC_API_KEY 미설정 또는 호출 실패).")
+        elif not failed:
+            st.info("비교 가능한 종목 데이터가 부족해요.")
+    elif raw:
+        st.info("종목을 **2~3개** 콤마로 구분해 입력해 주세요 (예: `NVDA, AMD`).")
 
 st.divider()
 st.caption("⚠️ 이 앱은 투자조언이 아니며 정보·교육 목적입니다. "

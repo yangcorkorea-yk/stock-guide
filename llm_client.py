@@ -171,6 +171,63 @@ def synthesize_analysis_ko(symbol: str, name: Optional[str],
         return None
 
 
+def compare_stocks_ko(items: list[dict]) -> Optional[str]:
+    """
+    여러 종목 데이터를 비교해 한국어 분석 텍스트 반환.
+    items: [{"symbol": "NVDA", "name": "엔비디아", "data": "..."}, ...]
+    반환: 마크다운 (표 + 종합 단락). 실패/키없음 시 None.
+    """
+    key = _key()
+    if not key or len(items) < 2:
+        return None
+    try:
+        from anthropic import Anthropic
+    except Exception:
+        return None
+
+    blocks = []
+    for it in items:
+        blocks.append(f"## {it['name']} ({it['symbol']})\n{it['data']}")
+    payload = "\n\n---\n\n".join(blocks)
+
+    system = (
+        "당신은 20년 경력의 미국 주식 애널리스트입니다. "
+        "한국 초보 투자자에게 여러 종목을 균형 있게 비교해 설명합니다.\n"
+        "규칙(엄수):\n"
+        "1) 가격 예측·목표가·매수/매도 권유 절대 금지.\n"
+        "2) 강점·약점·리스크를 균형 있게 짚을 것.\n"
+        "3) 주어진 데이터에 없는 사실은 만들지 말 것.\n"
+        "4) 회사명은 입력한 한국어 이름만 사용.\n"
+        "5) 큰 제목·헤더(# ##) 절대 금지."
+    )
+    user = (
+        f"다음 {len(items)}개 종목을 비교 분석해 주세요.\n\n"
+        f"{payload}\n\n"
+        "다음 형식으로만 작성:\n\n"
+        "**📋 한눈에 비교**\n"
+        "| 종목 | 강점 | 약점 | 어울리는 투자자 |\n"
+        "|---|---|---|---|\n"
+        "| (한국어이름) | 핵심 강점 1~2개 | 핵심 약점·리스크 1~2개 | 성향 (예: 성장 / 가치 / 배당) |\n"
+        "...(각 종목 한 줄)\n\n"
+        "**💡 종합 인사이트**\n"
+        "3~5줄 한국어 단락. 공통점·차이점·시장 위치를 균형 있게. "
+        "예측·추천 금지. 큰 제목 금지. 자연스러운 문단."
+    )
+    try:
+        client = Anthropic(api_key=key)
+        resp = client.messages.create(
+            model=_model_analysis(),
+            max_tokens=1500,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
+        text = _strip_headers(text)
+        return text or None
+    except Exception:
+        return None
+
+
 def translate_headlines_ko(headlines: list[str]) -> Optional[list[str]]:
     """
     영문 헤드라인 리스트를 한국어로 번역해 같은 순서·같은 개수로 반환.
