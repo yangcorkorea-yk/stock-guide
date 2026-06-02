@@ -296,6 +296,66 @@ def synthesize_event_briefing_ko(event: dict, market_text: str,
         return None
 
 
+def compare_kr_us_ko(pair: dict) -> Optional[dict]:
+    """
+    한국 종목 vs 미국 종목 1:1 비교 분석.
+    pair: {theme, kr:{name,ticker,desc}, us:{name,ticker,desc}, reason}
+    반환: {kr:{strengths[],weaknesses[]}, us:{strengths[],weaknesses[]},
+           insight, kr_investor_note}
+    """
+    key = _key()
+    if not key:
+        return None
+    try:
+        from anthropic import Anthropic
+    except Exception:
+        return None
+
+    kr = pair.get("kr", {})
+    us = pair.get("us", {})
+    system = (
+        "당신은 20년 경력의 한·미 시장 비교 전문 애널리스트입니다. "
+        "한국 초보 투자자에게 두 종목을 균형 있게 비교 설명합니다.\n"
+        "규칙(엄수):\n"
+        "1) 가격 예측·목표가·매수/매도 권유 금지.\n"
+        "2) 강점·약점·리스크 균형 있게.\n"
+        "3) 한국 투자자 관점의 차이(환율·세금·시장 시간 등) 언급 가능.\n"
+        "4) 회사명은 입력한 한국어만 사용.\n"
+        "5) JSON만 출력. 마크다운·코드펜스 금지."
+    )
+    user = (
+        f"비교 테마: {pair.get('theme', '')}\n"
+        f"비교 이유: {pair.get('reason', '')}\n\n"
+        f"[🇰🇷 {kr.get('name')} ({kr.get('ticker')})]\n{kr.get('desc', '')}\n\n"
+        f"[🇺🇸 {us.get('name')} ({us.get('ticker')})]\n{us.get('desc', '')}\n\n"
+        "JSON 스키마로만 응답:\n"
+        '{"kr":{"strengths":["짧은 강점 2~3개"],"weaknesses":["짧은 약점·리스크 2~3개"]},'
+        '"us":{"strengths":["..."],"weaknesses":["..."]},'
+        '"insight":"두 종목 비교 한국어 종합 3~4문장. 사업 모델/시장 위치 차이/공통 리스크 균형.",'
+        '"kr_investor_note":"한국 투자자 관점에서 알면 좋을 점 1~2문장 (환율/세금/배당세/거래시간 등). 매매 권유 금지."}'
+        "\n\n예측·매매 권유 절대 금지. 짧은 명사구 위주."
+    )
+    try:
+        client = Anthropic(api_key=key)
+        resp = client.messages.create(
+            model=_model_analysis(),
+            max_tokens=1500,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
+        import json as _json
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            return None
+        try:
+            return _json.loads(m.group(0))
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 def translate_headlines_ko(headlines: list[str]) -> Optional[list[str]]:
     """
     영문 헤드라인 리스트를 한국어로 번역해 같은 순서·같은 개수로 반환.

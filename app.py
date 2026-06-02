@@ -27,10 +27,11 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context, upcoming_earnings_for_symbols,
-                      _humanize_cap, sector_heatmap_data)
+                      _humanize_cap, sector_heatmap_data, KR_US_PAIRS)
 from news_client import fetch_news
 from llm_client import (summarize_news_ko, translate_headlines_ko,
-                        synthesize_analysis_ko, compare_stocks_ko)
+                        synthesize_analysis_ko, compare_stocks_ko,
+                        compare_kr_us_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta
 
@@ -442,6 +443,84 @@ def render_earnings_cards(earnings: list[dict]):
         f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px 0;">{items_html}</div>',
         unsafe_allow_html=True,
     )
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def cached_compare_kr_us(kr_ticker, us_ticker):
+    """한국 vs 미국 페어 비교 (24시간 캐시 — 페어 결과는 자주 안 바뀜)."""
+    pair = next(
+        (p for p in KR_US_PAIRS
+         if p["kr"]["ticker"] == kr_ticker and p["us"]["ticker"] == us_ticker),
+        None,
+    )
+    if not pair:
+        return None
+    return compare_kr_us_ko(pair)
+
+
+def render_kr_us_result(pair: dict, result: dict):
+    """한국 vs 미국 비교 결과 카드 (좌우 가로 그리드 + 종합 인사이트)."""
+    kr = result.get("kr") or {}
+    us = result.get("us") or {}
+    insight = (result.get("insight") or "").strip().replace("\n", "<br>")
+    kr_note = (result.get("kr_investor_note") or "").strip().replace("\n", "<br>")
+
+    def _ul(arr):
+        return "".join(f'<li style="margin-bottom:4px;">{x}</li>' for x in (arr or []))
+
+    cards_html = ""
+    for side_data, side_info, flag, accent in (
+        (kr, pair["kr"], "🇰🇷", "#ef4444"),
+        (us, pair["us"], "🇺🇸", "#3b82f6"),
+    ):
+        cards_html += (
+            f'<div style="flex:1 1 calc(50% - 8px);min-width:260px;'
+            f'padding:16px;background:rgba(255,255,255,0.04);'
+            f'border:1px solid {accent}40;border-radius:12px;">'
+            f'<div style="font-size:1.05rem;font-weight:700;margin-bottom:10px;'
+            f'padding-bottom:8px;border-bottom:2px solid {accent}50;">'
+            f'{flag} {side_info["name"]} <span style="font-size:0.8rem;opacity:0.6;">'
+            f'({side_info["ticker"]})</span></div>'
+            f'<div style="font-size:0.8rem;color:#10b981;margin-bottom:6px;'
+            f'font-weight:700;letter-spacing:0.03em;">✅ 강점</div>'
+            f'<ul style="margin:0 0 12px 18px;font-size:0.9rem;line-height:1.55;">'
+            f'{_ul(side_data.get("strengths"))}</ul>'
+            f'<div style="font-size:0.8rem;color:#ef4444;margin-bottom:6px;'
+            f'font-weight:700;letter-spacing:0.03em;">⚠️ 약점·리스크</div>'
+            f'<ul style="margin:0 0 4px 18px;font-size:0.9rem;line-height:1.55;">'
+            f'{_ul(side_data.get("weaknesses"))}</ul>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;">'
+        f'{cards_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if insight:
+        st.markdown(
+            f'<div style="padding:16px 20px;margin-top:14px;'
+            f'background:linear-gradient(135deg,rgba(99,102,241,0.10),rgba(168,85,247,0.06));'
+            f'border-left:4px solid #6366f1;border-radius:10px;">'
+            f'<div style="font-size:0.8rem;color:#6366f1;margin-bottom:8px;'
+            f'font-weight:700;letter-spacing:0.03em;">💡 종합 인사이트</div>'
+            f'<div style="font-size:0.95rem;line-height:1.75;">{insight}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    if kr_note:
+        st.markdown(
+            f'<div style="padding:12px 16px;margin-top:10px;'
+            f'background:rgba(245,158,11,0.08);'
+            f'border-left:4px solid #f59e0b;border-radius:8px;">'
+            f'<div style="font-size:0.78rem;color:#f59e0b;margin-bottom:6px;'
+            f'font-weight:700;">🇰🇷 한국 투자자 노트</div>'
+            f'<div style="font-size:0.9rem;line-height:1.7;">{kr_note}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    st.caption("✨ AI 비교 — 예측·매매 권유 아님. 정보 참고용. 가격·시총 등 실시간 데이터는 미반영.")
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -1151,7 +1230,57 @@ with tab4:
                     st.error("이 테마가 현재 카탈로그에 없어요 (데이터가 더 오래되었을 수 있어요).")
 
 # ── 탭 5: 종목 비교 AI ──────────────────────────
+def render_kr_us_pairs_ui():
+    """한국 vs 미국 페어 비교 UI (tab5 내부에서 호출)."""
+    st.caption("자주 비교되는 한·미 페어를 골라 AI 분석을 받아요. 예측·매매 권유 아님.")
+    st.session_state.setdefault("kr_us_pair_key", None)
+
+    by_theme = {}
+    for p in KR_US_PAIRS:
+        by_theme.setdefault(p["theme"], []).append(p)
+
+    for theme, pairs in by_theme.items():
+        st.markdown(f"**{theme}**")
+        cols = st.columns(min(len(pairs), 2))
+        for i, p in enumerate(pairs):
+            key = f"{p['kr']['ticker']}|{p['us']['ticker']}"
+            label = f"{p['kr']['name']} 🇰🇷 vs 🇺🇸 {p['us']['name']}"
+            if cols[i % len(cols)].button(label, key=f"krus_{key}",
+                                          use_container_width=True):
+                st.session_state.kr_us_pair_key = key
+                st.rerun()
+
+    _sel_key = st.session_state.get("kr_us_pair_key")
+    if _sel_key:
+        kr_t, us_t = _sel_key.split("|", 1)
+        selected = next((p for p in KR_US_PAIRS
+                         if p["kr"]["ticker"] == kr_t and p["us"]["ticker"] == us_t),
+                        None)
+        if selected:
+            st.divider()
+            st.markdown(f"### {selected['kr']['name']} 🇰🇷 vs 🇺🇸 {selected['us']['name']}")
+            st.caption(f"비교 이유: {selected['reason']}")
+            with st.spinner("✨ AI 비교 분석 중..."):
+                result = cached_compare_kr_us(kr_t, us_t)
+            if result:
+                render_kr_us_result(selected, result)
+            else:
+                st.caption("AI 분석 실패 (ANTHROPIC_API_KEY 미설정 또는 호출 실패).")
+
+
 with tab5:
+    _compare_mode = st.radio(
+        "비교 모드",
+        ["🇺🇸 미국 종목 간", "🇰🇷 vs 🇺🇸 페어"],
+        horizontal=True, label_visibility="collapsed",
+        key="compare_mode",
+    )
+
+if _compare_mode == "🇰🇷 vs 🇺🇸 페어":
+    with tab5:
+        render_kr_us_pairs_ui()
+else:
+  with tab5:
     st.write("종목을 **검색해서 비교함에 담아** AI 분석을 받아요. (최대 3개)")
     st.caption("예측·매수·매도 권유가 아니에요. 정보 비교용.")
 
