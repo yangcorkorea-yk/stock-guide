@@ -65,6 +65,33 @@ def _strip_headers(text: str) -> str:
     return text.strip()
 
 
+def _extract_json(text: str) -> Optional[dict]:
+    """LLM 응답에서 JSON 안정적 추출.
+    · 코드펜스(```json···```) 제거
+    · prefix 텍스트 무시 (첫 { 부터 마지막 } 까지)
+    · trailing comma 보정 (JSON 표준 위반이지만 LLM이 자주 만듦)
+    """
+    if not text:
+        return None
+    cleaned = re.sub(r"```(?:json)?", "", text)
+    cleaned = cleaned.replace("```", "")
+    m = re.search(r"\{[\s\S]*\}", cleaned)
+    if not m:
+        return None
+    import json as _json
+    candidate = m.group(0)
+    # 1차: 원본 그대로
+    for attempt in (candidate,
+                    re.sub(r",\s*([}\]])", r"\1", candidate),  # trailing comma 제거
+                    re.sub(r",\s*([}\]])", r"\1",
+                           re.sub(r"^\s*//.*$", "", candidate, flags=re.MULTILINE))):  # 주석 제거
+        try:
+            return _json.loads(attempt)
+        except Exception:
+            continue
+    return None
+
+
 def summarize_news_ko(symbol: str, name: Optional[str], sector: Optional[str],
                       headlines: list[str]) -> Optional[str]:
     """
@@ -223,14 +250,7 @@ def compare_stocks_ko(items: list[dict]) -> Optional[dict]:
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
-        import json as _json
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            return None
-        try:
-            return _json.loads(m.group(0))
-        except Exception:
-            return None
+        return _extract_json(text)
     except Exception:
         return None
 
@@ -279,19 +299,12 @@ def synthesize_event_briefing_ko(event: dict, market_text: str,
         client = Anthropic(api_key=key)
         resp = client.messages.create(
             model=_model_analysis(),
-            max_tokens=1200,
+            max_tokens=1800,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
-        import json as _json
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            return None
-        try:
-            return _json.loads(m.group(0))
-        except Exception:
-            return None
+        return _extract_json(text)
     except Exception:
         return None
 
@@ -339,19 +352,12 @@ def compare_kr_us_ko(pair: dict) -> Optional[dict]:
         client = Anthropic(api_key=key)
         resp = client.messages.create(
             model=_model_analysis(),
-            max_tokens=1500,
+            max_tokens=2200,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(b.text if hasattr(b, "text") else "" for b in resp.content).strip()
-        import json as _json
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            return None
-        try:
-            return _json.loads(m.group(0))
-        except Exception:
-            return None
+        return _extract_json(text)
     except Exception:
         return None
 
