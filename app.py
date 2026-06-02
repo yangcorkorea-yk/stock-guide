@@ -386,13 +386,23 @@ def show_detail(symbol, df, context=None):
             for label, key, tip in cards:
                 value = brief.get(key) or "—"
                 items_html += (
-                    f'<div title="{tip}" '
-                    f'style="flex:1 1 calc(33.33% - 6px);min-width:140px;'
+                    f'<div style="flex:1 1 calc(33.33% - 6px);min-width:140px;'
                     f'padding:12px 14px;background:rgba(255,255,255,0.04);'
-                    f'border-radius:10px;cursor:help;">'
-                    f'<div style="font-size:0.9rem;color:#9aa0a6;margin-bottom:6px;">{label}</div>'
+                    f'border-radius:10px;">'
+                    f'<div style="font-size:0.9rem;color:#9aa0a6;margin-bottom:6px;'
+                    f'display:flex;align-items:center;gap:4px;">'
+                    f'<span>{label}</span>'
+                    f'<span title="{tip}" style="cursor:help;color:#6c757d;'
+                    f'font-size:0.85rem;">ⓘ</span>'
+                    f'</div>'
                     f'<div style="font-size:1.55rem;font-weight:600;line-height:1.2;'
                     f'word-break:break-all;">{value}</div>'
+                    f'<details style="margin-top:6px;">'
+                    f'<summary style="cursor:pointer;color:#9aa0a6;font-size:0.75rem;'
+                    f'list-style:none;user-select:none;">설명 보기</summary>'
+                    f'<div style="margin-top:4px;font-size:0.78rem;color:#adb5bd;'
+                    f'line-height:1.4;">{tip}</div>'
+                    f'</details>'
                     f'</div>'
                 )
             st.markdown(
