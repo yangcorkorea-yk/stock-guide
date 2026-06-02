@@ -593,8 +593,112 @@ def _humanize_cap(v):
     return f"${v:,.0f}"
 
 
+def _humanize_cap_millions(v):
+    """Finnhub은 시총을 백만 USD 단위로 줌. 그걸 사람 친화 표기로."""
+    try:
+        v = float(v) * 1_000_000  # millions → raw
+    except (TypeError, ValueError):
+        return None
+    return _humanize_cap(v)
+
+
+def _apply_finnhub(out: dict, symbol: str) -> bool:
+    """Finnhub에서 데이터를 받아 out에 채운다. 1건이라도 채웠으면 True."""
+    try:
+        from finnhub_client import (get_company_profile, get_basic_financials,
+                                    get_next_earnings)
+    except Exception:
+        return False
+
+    filled = False
+
+    # 프로필 (회사명, 업종, 시총)
+    prof = get_company_profile(symbol)
+    if prof:
+        out["name"] = prof.get("name") or out["name"]
+        ind = prof.get("finnhubIndustry")
+        out["industry"] = ind or out["industry"]
+        # Finnhub의 'finnhubIndustry'는 비교적 좁은 업종명. 한국어 매핑이 없을 가능성 높음.
+        # 일단 industry 영문 그대로 두고, sector는 industry 영문으로 폴백.
+        if ind and not out.get("sector"):
+            out["sector"] = ind
+        cap = _humanize_cap_millions(prof.get("marketCapitalization"))
+        if cap:
+            out["cap"] = cap
+        filled = True
+
+    # 펀더멘털 지표
+    m = get_basic_financials(symbol)
+    if m:
+        def _ratio(v, suffix="배"):
+            return f"{v:.1f}{suffix}" if isinstance(v, (int, float)) else None
+
+        def _pct_already(v, signed=False):
+            # Finnhub의 마진/성장률/ROE 는 이미 percent 단위(예: 62.1)
+            if not isinstance(v, (int, float)):
+                return None
+            return f"{v:+.1f}%" if signed else f"{v:.1f}%"
+
+        # PER: peNormalizedAnnual 우선, 없으면 peExclExtraTTM
+        pe = m.get("peNormalizedAnnual") or m.get("peExclExtraTTM") or m.get("peBasicExclExtraTTM")
+        if pe and not out.get("pe"):
+            out["pe"] = _ratio(pe)
+        # forward PE는 별도 키 없음 — 생략
+        ps = m.get("psTTM") or m.get("psAnnual")
+        if ps and not out.get("psr"):
+            out["psr"] = _ratio(ps)
+        pb = m.get("pbAnnual") or m.get("pbQuarterly")
+        if pb and not out.get("pbr"):
+            out["pbr"] = _ratio(pb)
+        dy = m.get("dividendYieldIndicatedAnnual")
+        if isinstance(dy, (int, float)) and not out.get("div_yield"):
+            out["div_yield"] = f"{dy:.2f}%" if dy > 0 else "0%"
+        op = m.get("operatingMarginTTM") or m.get("operatingMarginAnnual")
+        if op and not out.get("op_margin"):
+            out["op_margin"] = _pct_already(op)
+        pm = m.get("netProfitMarginTTM") or m.get("netProfitMarginAnnual")
+        if pm and not out.get("profit_margin"):
+            out["profit_margin"] = _pct_already(pm)
+        rg = (m.get("revenueGrowthTTMYoy") or m.get("revenueGrowthQuarterlyYoy")
+              or m.get("revenueGrowth5Y"))
+        if rg and not out.get("rev_growth"):
+            out["rev_growth"] = _pct_already(rg, signed=True)
+        eg = m.get("epsGrowthTTMYoy") or m.get("epsGrowth5Y")
+        if eg and not out.get("earnings_growth"):
+            out["earnings_growth"] = _pct_already(eg, signed=True)
+        roe = m.get("roeTTM") or m.get("roeRfy")
+        if roe and not out.get("roe"):
+            out["roe"] = _pct_already(roe)
+        b = m.get("beta")
+        if isinstance(b, (int, float)) and not out.get("beta"):
+            out["beta"] = f"{b:.2f}"
+        filled = True
+
+    # 다음 실적
+    er = get_next_earnings(symbol)
+    if er and er.get("date") and not out.get("earnings_date"):
+        from datetime import date as _date
+        try:
+            edate = _date.fromisoformat(er["date"])
+            out["earnings_date"] = str(edate)
+            out["earnings_days"] = (edate - _date.today()).days
+            eps = er.get("epsEstimate")
+            if isinstance(eps, (int, float)):
+                out["earnings_eps_est"] = f"${eps:.2f}"
+            rev = er.get("revenueEstimate")
+            if isinstance(rev, (int, float)):
+                out["earnings_revenue_est"] = _humanize_cap(rev)
+            filled = True
+        except Exception:
+            pass
+
+    return filled
+
+
 def company_brief(symbol):
-    """회사 기본정보 + 펀더멘털 + 다음 실적 + 최근 뉴스. 못 가져온 항목은 None으로 graceful."""
+    """회사 기본정보 + 펀더멘털 + 다음 실적 + 최근 뉴스. 못 가져온 항목은 None으로 graceful.
+    출처 우선순위: Finnhub(빠르고 안정) → yfinance(폴백/보강).
+    """
     out = {
         "name": symbol, "sector": None, "industry": None,
         "cap": None, "pe": None,
@@ -608,6 +712,17 @@ def company_brief(symbol):
         "earnings_eps_est": None, "earnings_revenue_est": None,
         "news": [],
     }
+
+    # ① Finnhub 우선 — 펀더멘털·프로필·실적 (Yahoo rate limit 영향 없음)
+    finnhub_ok = False
+    try:
+        finnhub_ok = _apply_finnhub(out, symbol)
+    except Exception as e:
+        import sys
+        print(f"[company_brief] {symbol} finnhub 실패: {type(e).__name__}: {e}",
+              file=sys.stderr)
+
+    # ② yfinance — 뉴스·sector 한국어 매핑 등 보강용 (실패해도 graceful)
     try:
         import yfinance as yf
         tk = yf.Ticker(symbol)
@@ -637,11 +752,18 @@ def company_brief(symbol):
             except Exception:
                 pass
 
-        out["name"] = info.get("shortName") or info.get("longName") or symbol
+        # yfinance 결과로 빈 필드만 보강 (Finnhub 우선)
+        yf_name = info.get("shortName") or info.get("longName")
+        if yf_name and (not finnhub_ok or out["name"] == symbol):
+            out["name"] = yf_name
         sec = info.get("sector")
-        out["sector"] = _SECTOR_KO.get(sec, sec)
-        out["industry"] = info.get("industry")
-        out["cap"] = _humanize_cap(info.get("marketCap"))
+        yf_sector = _SECTOR_KO.get(sec, sec)
+        if yf_sector:
+            out["sector"] = yf_sector  # yfinance의 한국어 매핑된 sector 우선
+        if info.get("industry"):
+            out["industry"] = info["industry"]
+        if not out.get("cap"):
+            out["cap"] = _humanize_cap(info.get("marketCap"))
 
         def _ratio(v, suffix="배"):
             return f"{v:.1f}{suffix}" if isinstance(v, (int, float)) else None
@@ -652,42 +774,53 @@ def company_brief(symbol):
             fmt = f"{v*100:+.1f}%" if signed else f"{v*100:.1f}%"
             return fmt
 
-        out["pe"] = _ratio(info.get("trailingPE"))
-        out["pe_fwd"] = _ratio(info.get("forwardPE"))
-        out["psr"] = _ratio(info.get("priceToSalesTrailing12Months"))
-        out["pbr"] = _ratio(info.get("priceToBook"))
+        # 빈 필드만 보강 (Finnhub이 채운 값 보존)
+        if not out.get("pe"):
+            out["pe"] = _ratio(info.get("trailingPE"))
+        if not out.get("pe_fwd"):
+            out["pe_fwd"] = _ratio(info.get("forwardPE"))
+        if not out.get("psr"):
+            out["psr"] = _ratio(info.get("priceToSalesTrailing12Months"))
+        if not out.get("pbr"):
+            out["pbr"] = _ratio(info.get("priceToBook"))
 
-        # 배당수익률: yfinance의 dividendYield 필드는 단위 일관성이 없음
-        # (어떤 종목은 0.0089 = decimal, 어떤 종목은 0.89 = 이미 percent).
-        # 더 안정적인 방법: dividendRate / currentPrice 로 직접 계산.
-        div_rate = (info.get("dividendRate")
-                    or info.get("trailingAnnualDividendRate"))
-        price = (info.get("currentPrice")
-                 or info.get("regularMarketPrice")
-                 or info.get("previousClose"))
-        if (isinstance(div_rate, (int, float)) and div_rate > 0
-                and isinstance(price, (int, float)) and price > 0):
-            out["div_yield"] = f"{(div_rate / price) * 100:.2f}%"
-        else:
-            # 폴백: dividendYield 필드 (1보다 작으면 decimal, 크면 이미 percent로 가정)
-            dy = info.get("dividendYield")
-            if isinstance(dy, (int, float)) and dy > 0:
-                pct = dy * 100 if dy < 1 else dy
-                out["div_yield"] = f"{pct:.2f}%"
-            elif isinstance(dy, (int, float)):
-                out["div_yield"] = "0%"
+        if not out.get("div_yield"):
+            # yfinance dividendYield 단위 모호성 우회: dividendRate / price 계산
+            div_rate = (info.get("dividendRate")
+                        or info.get("trailingAnnualDividendRate"))
+            price = (info.get("currentPrice")
+                     or info.get("regularMarketPrice")
+                     or info.get("previousClose"))
+            if (isinstance(div_rate, (int, float)) and div_rate > 0
+                    and isinstance(price, (int, float)) and price > 0):
+                out["div_yield"] = f"{(div_rate / price) * 100:.2f}%"
+            else:
+                dy = info.get("dividendYield")
+                if isinstance(dy, (int, float)) and dy > 0:
+                    pct = dy * 100 if dy < 1 else dy
+                    out["div_yield"] = f"{pct:.2f}%"
+                elif isinstance(dy, (int, float)):
+                    out["div_yield"] = "0%"
 
-        out["op_margin"] = _pct(info.get("operatingMargins"))
-        out["profit_margin"] = _pct(info.get("profitMargins"))
-        out["rev_growth"] = _pct(info.get("revenueGrowth"), signed=True)
-        out["earnings_growth"] = _pct(info.get("earningsGrowth"), signed=True)
-        out["roe"] = _pct(info.get("returnOnEquity"))
-        beta = info.get("beta")
-        if isinstance(beta, (int, float)):
-            out["beta"] = f"{beta:.2f}"
+        if not out.get("op_margin"):
+            out["op_margin"] = _pct(info.get("operatingMargins"))
+        if not out.get("profit_margin"):
+            out["profit_margin"] = _pct(info.get("profitMargins"))
+        if not out.get("rev_growth"):
+            out["rev_growth"] = _pct(info.get("revenueGrowth"), signed=True)
+        if not out.get("earnings_growth"):
+            out["earnings_growth"] = _pct(info.get("earningsGrowth"), signed=True)
+        if not out.get("roe"):
+            out["roe"] = _pct(info.get("returnOnEquity"))
+        if not out.get("beta"):
+            beta = info.get("beta")
+            if isinstance(beta, (int, float)):
+                out["beta"] = f"{beta:.2f}"
 
-        # 다음 실적 발표일 (yfinance calendar)
+        # 다음 실적 발표일 (yfinance calendar) — Finnhub이 못 채운 경우만
         try:
+            if out.get("earnings_date"):
+                raise StopIteration  # 이미 Finnhub에서 가져옴
             from datetime import date as _date
             cal = tk.calendar  # dict 또는 DataFrame일 수 있음
             edate = None
