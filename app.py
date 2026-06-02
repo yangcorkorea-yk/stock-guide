@@ -27,7 +27,7 @@ from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context, upcoming_earnings_for_symbols,
-                      _humanize_cap)
+                      _humanize_cap, sector_heatmap_data)
 from news_client import fetch_news
 from llm_client import (summarize_news_ko, translate_headlines_ko,
                         synthesize_analysis_ko, compare_stocks_ko)
@@ -307,6 +307,67 @@ def _build_compare_payload(symbol):
 def cached_upcoming_earnings(symbols_tuple, days=30):
     """주어진 종목들의 다가오는 실적 일정 (6시간 캐시)."""
     return upcoming_earnings_for_symbols(list(symbols_tuple), days=days)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_sector_heatmap():
+    """11개 GICS 섹터 ETF 히트맵 데이터 (1시간 캐시)."""
+    return sector_heatmap_data()
+
+
+def _pct_to_color(pct, max_abs=8.0):
+    """수익률(%) → 셀 배경색. ±max_abs% 범위로 클램프, 초록↔빨강 그라데이션."""
+    if pct is None:
+        return "transparent"
+    p = max(-max_abs, min(max_abs, pct)) / max_abs  # -1 ~ 1
+    if p >= 0:
+        return f"rgba(16,185,129,{0.10 + p*0.50:.2f})"  # 초록
+    return f"rgba(239,68,68,{0.10 + (-p)*0.50:.2f})"   # 빨강
+
+
+def render_sector_heatmap():
+    """섹터 로테이션 히트맵 (HTML 테이블, 3개월 수익률 강한 순)."""
+    data = cached_sector_heatmap()
+    if not data:
+        st.caption("섹터 히트맵 데이터를 못 받았어요. (Alpaca 시세 일시 장애)")
+        return
+    data = sorted(data, key=lambda x: -(x.get("m3") if x.get("m3") is not None else -999))
+
+    head = (
+        '<tr style="font-size:0.78rem;opacity:0.65;">'
+        '<th style="text-align:left;padding:8px 10px;">섹터</th>'
+        '<th style="text-align:right;padding:8px 10px;">1주</th>'
+        '<th style="text-align:right;padding:8px 10px;">1개월</th>'
+        '<th style="text-align:right;padding:8px 10px;">3개월</th>'
+        '</tr>'
+    )
+    rows = ""
+    for r in data:
+        row = (
+            f'<td style="padding:9px 10px;font-weight:500;">'
+            f'{r["name"]} <span style="opacity:0.45;font-size:0.78rem;">({r["symbol"]})</span></td>'
+        )
+        for k in ("w1", "m1", "m3"):
+            v = r.get(k)
+            if v is None:
+                row += '<td style="padding:9px 10px;text-align:right;opacity:0.4;">—</td>'
+            else:
+                bg = _pct_to_color(v)
+                sign = "+" if v >= 0 else ""
+                row += (
+                    f'<td style="padding:9px 10px;text-align:right;background:{bg};'
+                    f'font-weight:600;font-size:0.9rem;border-radius:4px;">'
+                    f'{sign}{v:.2f}%</td>'
+                )
+        rows += f'<tr>{row}</tr>'
+
+    st.markdown(
+        f'<table style="width:100%;border-collapse:separate;border-spacing:2px 2px;'
+        f'font-size:0.9rem;">{head}{rows}</table>',
+        unsafe_allow_html=True,
+    )
+    st.caption("11개 GICS 섹터 ETF · 3개월 수익률 강한 순 · 색이 진할수록 큰 변동 "
+               "(초록=상승, 빨강=하락).")
 
 
 def render_earnings_cards(earnings: list[dict]):
@@ -987,6 +1048,9 @@ with tab1:
 
 # ── 탭 2: 섹터 탐색 ──────────────────────────────
 with tab2:
+    with st.expander("🔥 섹터 로테이션 히트맵 — 지금 어떤 섹터가 강한가", expanded=True):
+        render_sector_heatmap()
+
     st.write("관심 있는 **섹터**를 고르면, 그 안 대표 종목들의 현재 상태가 한눈에 보여요.")
     st.caption("👇 섹터를 톡 누르면 선택돼요 (키보드 안 뜨게 버튼식이에요)")
     sector = st.pills("섹터 선택", list(SECTORS.keys()), selection_mode="single",

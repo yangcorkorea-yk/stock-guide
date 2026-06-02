@@ -602,6 +602,45 @@ def _humanize_cap_millions(v):
     return _humanize_cap(v)
 
 
+# ── 섹터 로테이션 히트맵 (11개 GICS 섹터 ETF) ──────────
+GICS_SECTORS = [
+    ("XLK", "기술"),
+    ("XLC", "커뮤니케이션"),
+    ("XLY", "임의소비재"),
+    ("XLP", "필수소비재"),
+    ("XLV", "헬스케어"),
+    ("XLF", "금융"),
+    ("XLI", "산업재"),
+    ("XLE", "에너지"),
+    ("XLB", "소재"),
+    ("XLU", "유틸리티"),
+    ("XLRE", "부동산"),
+]
+
+
+def sector_heatmap_data() -> list[dict]:
+    """
+    11개 GICS 섹터 ETF의 1주/1개월/3개월 수익률.
+    반환: [{symbol, name, w1, m1, m3}, ...]
+    """
+    out = []
+    for sym, name in GICS_SECTORS:
+        try:
+            df = get_bars(sym, days=200)
+            if df is None or len(df) < 10:
+                continue
+            c = df['close'].dropna()
+            cur = float(c.iloc[-1])
+            w1 = (cur / float(c.iloc[-6]) - 1) * 100 if len(c) >= 6 else None
+            m1 = (cur / float(c.iloc[-22]) - 1) * 100 if len(c) >= 22 else None
+            m3 = (cur / float(c.iloc[-64]) - 1) * 100 if len(c) >= 64 else None
+            out.append({"symbol": sym, "name": name,
+                        "w1": w1, "m1": m1, "m3": m3})
+        except Exception:
+            continue
+    return out
+
+
 def upcoming_earnings_for_symbols(symbols: list, days: int = 30) -> list[dict]:
     """
     주어진 종목 중 향후 N일 안에 실적 발표 예정인 항목 (Finnhub 기준).
