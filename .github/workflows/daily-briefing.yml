@@ -1,0 +1,44 @@
+name: Daily — Market Briefing
+
+on:
+  schedule:
+    # 매일 21:30 UTC = KST 06:30 (미국 마감 직후, 한국 아침 출근 전)
+    - cron: "30 21 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Generate briefing
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL_ANALYSIS: ${{ vars.ANTHROPIC_MODEL_ANALYSIS || 'claude-sonnet-4-6' }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: python scripts/refresh_briefing.py
+
+      - name: Commit JSON if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/market_briefing.json)" ]; then
+            git add data/market_briefing.json
+            git commit -m "chore(data): refresh market_briefing [skip ci]"
+            git push
+          else
+            echo "변경 없음."
+          fi
