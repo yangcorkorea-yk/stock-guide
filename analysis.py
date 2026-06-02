@@ -602,42 +602,40 @@ def _humanize_cap_millions(v):
     return _humanize_cap(v)
 
 
-# ── 섹터 로테이션 히트맵 (11개 GICS 섹터 ETF) ──────────
-GICS_SECTORS = [
-    ("XLK", "기술"),
-    ("XLC", "커뮤니케이션"),
-    ("XLY", "임의소비재"),
-    ("XLP", "필수소비재"),
-    ("XLV", "헬스케어"),
-    ("XLF", "금융"),
-    ("XLI", "산업재"),
-    ("XLE", "에너지"),
-    ("XLB", "소재"),
-    ("XLU", "유틸리티"),
-    ("XLRE", "부동산"),
-]
-
-
+# ── 섹터 로테이션 히트맵 (우리 SECTORS 카탈로그 기준) ──────────
 def sector_heatmap_data() -> list[dict]:
     """
-    11개 GICS 섹터 ETF의 1주/1개월/3개월 수익률.
-    반환: [{symbol, name, w1, m1, m3}, ...]
+    SECTORS 카탈로그(22개 그룹)의 평균 수익률.
+    각 그룹 내 종목의 1주(5거래일)/1개월(21)/3개월(63) 수익률을 동일 가중 평균.
+    반환: [{name, w1, m1, m3, n}, ...]  (n = 평균에 사용된 종목 수)
     """
     out = []
-    for sym, name in GICS_SECTORS:
-        try:
-            df = get_bars(sym, days=200)
-            if df is None or len(df) < 10:
+    for name, syms in SECTORS.items():
+        w1, m1, m3 = [], [], []
+        for s in syms:
+            try:
+                df = get_bars(s, days=200)
+                if df is None or len(df) < 6:
+                    continue
+                c = df['close'].dropna()
+                cur = float(c.iloc[-1])
+                if len(c) >= 6:
+                    w1.append((cur / float(c.iloc[-6]) - 1) * 100)
+                if len(c) >= 22:
+                    m1.append((cur / float(c.iloc[-22]) - 1) * 100)
+                if len(c) >= 64:
+                    m3.append((cur / float(c.iloc[-64]) - 1) * 100)
+            except Exception:
                 continue
-            c = df['close'].dropna()
-            cur = float(c.iloc[-1])
-            w1 = (cur / float(c.iloc[-6]) - 1) * 100 if len(c) >= 6 else None
-            m1 = (cur / float(c.iloc[-22]) - 1) * 100 if len(c) >= 22 else None
-            m3 = (cur / float(c.iloc[-64]) - 1) * 100 if len(c) >= 64 else None
-            out.append({"symbol": sym, "name": name,
-                        "w1": w1, "m1": m1, "m3": m3})
-        except Exception:
+        if not (w1 or m1 or m3):
             continue
+        out.append({
+            "name": name,
+            "w1": (sum(w1) / len(w1)) if w1 else None,
+            "m1": (sum(m1) / len(m1)) if m1 else None,
+            "m3": (sum(m3) / len(m3)) if m3 else None,
+            "n": max(len(w1), len(m1), len(m3)),
+        })
     return out
 
 
