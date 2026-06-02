@@ -1,0 +1,18 @@
+{
+  "event_briefings": [
+    {
+      "date": "2026-06-01",
+      "event_name": "ISM 제조업 PMI",
+      "tag": "🏭 ISM",
+      "headline": "ISM 제조업 PMI 발표, 증시 소폭 상승",
+      "summary": "2026년 6월 1일 ISM 제조업 PMI가 발표되었으나, 제공된 헤드라인에서 구체적인 지수 수치 및 컨센서스 비교 데이터는 확인되지 않습니다. 발표 당일 시장은 전반적으로 안정적인 흐름을 유지했으며, 제조업 경기 동향에 대한 투자자들의 주목이 이어졌습니다.",
+      "market_reaction": "발표 다음 날 S&P500(SPY) +0.14%, 나스닥100(QQQ) +0.46%, 다우(DIA) +0.51%로 주요 지수 모두 소폭 상승 마감하며 차분한 반응을 보였습니다.",
+      "sectors_affected": [
+        "AI·기술주 강세 — Qualcomm, CrowdStrike, GitLab 등 IT 종목 상승 흐름",
+        "소비재·리테일 주목 — GameStop 사상 최고 분기 순이익, Ulta Beauty·Sportsman's Warehouse 실적 호조",
+        "산업재 일부 이동 — 제조업 지표 발표에 따른 산업재 섹터 변동 관찰"
+      ],
+      "generated_at": "2026-06-02T22:41:33Z"
+    }
+  ]
+}
