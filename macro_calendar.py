@@ -131,6 +131,11 @@ def _first_weekday(year: int, month: int, weekday: int) -> date:
     return d
 
 
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """그 달 N번째 weekday (N=1이 첫째)."""
+    return _first_weekday(year, month, weekday) + timedelta(days=7 * (n - 1))
+
+
 def _nth_business_day(year: int, month: int, n: int) -> date:
     """그 달 N번째 영업일 (월~금)."""
     d = date(year, month, 1)
@@ -221,6 +226,30 @@ def _auto_events(start: date, end: date) -> list[dict]:
                 "desc": "구인 건수·이직률 (BLS). 노동시장 강도 지표.",
                 "is_estimate": True,
             })
+
+        # CPI: 매월 둘째 수요일 (BLS 일정 추정 — 큐레이션 JSON이 우선이지만
+        # 갱신 실패 시 안전망으로 자동 계산)
+        cpi_d = _nth_weekday(y, m, 2, 2)  # 수=2, 둘째
+        prev_m = m - 1 if m > 1 else 12
+        if start <= cpi_d <= end:
+            events.append({
+                "date": str(cpi_d),
+                "name": f"{prev_m}월 CPI 발표",
+                "tag": "📊 CPI",
+                "desc": "소비자물가지수 (BLS). 인플레이션 핵심 지표.",
+                "is_estimate": True,
+            })
+
+        # PPI: CPI 다음날 (둘째 목요일)
+        ppi_d = _nth_weekday(y, m, 3, 2)  # 목=3, 둘째
+        if start <= ppi_d <= end:
+            events.append({
+                "date": str(ppi_d),
+                "name": f"{prev_m}월 PPI 발표",
+                "tag": "📈 PPI",
+                "desc": "생산자물가지수 (BLS). CPI 다음날 발표.",
+                "is_estimate": True,
+            })
         if m == 12:
             y, m = y + 1, 1
         else:
@@ -268,9 +297,17 @@ def upcoming_events(days: int = 30, today: Optional[date] = None) -> list[dict]:
         except Exception:
             continue
 
-    # 같은 (date, tag) 중복 제거 — 큐레이션 우선
-    seen = {(e["date"], e.get("tag", "")) for e in curated_filt}
-    merged = list(curated_filt) + [e for e in auto if (e["date"], e.get("tag", "")) not in seen]
+    # 중복 제거 — 큐레이션 우선
+    # · 같은 (date, tag): 큐레이션 우선
+    # · 같은 (year-month, tag): 큐레이션 있으면 자동 추정은 제외 (날짜만 다른 동일 이벤트)
+    seen_exact = {(e["date"], e.get("tag", "")) for e in curated_filt}
+    seen_month = {(e["date"][:7], e.get("tag", "")) for e in curated_filt}
+    auto_kept = [
+        e for e in auto
+        if (e["date"], e.get("tag", "")) not in seen_exact
+        and (e["date"][:7], e.get("tag", "")) not in seen_month
+    ]
+    merged = list(curated_filt) + auto_kept
     merged.sort(key=lambda x: x["date"])
 
     for e in merged:
