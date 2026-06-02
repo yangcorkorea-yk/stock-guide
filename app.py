@@ -94,6 +94,7 @@ def toggle_watch(symbol):
     set_watchlist(wl)
 
 HOT_THEMES_PATH = Path(__file__).resolve().parent / "data" / "hot_themes.json"
+BRIEFING_PATH = Path(__file__).resolve().parent / "data" / "market_briefing.json"
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -101,6 +102,15 @@ def load_hot_themes():
     """data/hot_themes.json 을 읽어옴. 파일 없거나 파싱 실패 시 None."""
     try:
         return json.loads(HOT_THEMES_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_market_briefing():
+    """data/market_briefing.json (GH Actions가 매일 갱신). 없으면 None."""
+    try:
+        return json.loads(BRIEFING_PATH.read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -634,6 +644,28 @@ def render_theme_detail(tname):
 
 st.title("📈 종목 길잡이")
 st.caption("미국주식 초보자를 위한 '지금 이 종목, 어떤 상태?' 도구")
+
+
+# ── 오늘의 시장 브리핑 (LLM 자동 생성, GH Actions 일일 갱신) ──
+_brief = load_market_briefing()
+if _brief and _brief.get("briefing"):
+    _hl = (_brief.get("headline") or "").strip()
+    _bd = _brief.get("briefing").strip().replace("\n", "<br>")
+    _md = _brief.get("market_date") or ""
+    st.markdown(
+        f'<div style="padding:16px 20px;'
+        f'background:linear-gradient(135deg,rgba(99,102,241,0.10),rgba(168,85,247,0.06));'
+        f'border-left:4px solid #6366f1;border-radius:10px;margin-bottom:14px;">'
+        f'<div style="font-size:0.8rem;color:#9aa0a6;margin-bottom:6px;'
+        f'letter-spacing:0.02em;">📰 오늘의 시장 브리핑</div>'
+        f'<div style="font-size:1.15rem;font-weight:700;margin-bottom:10px;'
+        f'line-height:1.35;">{_hl}</div>'
+        f'<div style="font-size:0.95rem;line-height:1.65;color:#dee2e6;">{_bd}</div>'
+        f'<div style="font-size:0.72rem;color:#868e96;margin-top:12px;">'
+        f'기준일 {_md} · AI 분석 · 예측·매매 권유 아님</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ── 시장 컨텍스트 바 (모든 탭 위 상단) ───────────────
