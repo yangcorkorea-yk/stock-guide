@@ -445,9 +445,8 @@ def render_earnings_cards(earnings: list[dict]):
     )
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def cached_compare_kr_us(kr_ticker, us_ticker):
-    """한국 vs 미국 페어 비교 (24시간 캐시 — 페어 결과는 자주 안 바뀜)."""
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_compare_kr_us_inner(kr_ticker, us_ticker):
     pair = next(
         (p for p in KR_US_PAIRS
          if p["kr"]["ticker"] == kr_ticker and p["us"]["ticker"] == us_ticker),
@@ -456,6 +455,19 @@ def cached_compare_kr_us(kr_ticker, us_ticker):
     if not pair:
         return None
     return compare_kr_us_ko(pair)
+
+
+def cached_compare_kr_us(kr_ticker, us_ticker):
+    """한국 vs 미국 페어 비교. 성공은 캐시, None(실패)은 캐시 무효화."""
+    res = _cached_compare_kr_us_inner(kr_ticker, us_ticker)
+    if res is None:
+        # 실패 결과를 캐시에 박아두지 않도록 그 함수 캐시 전체 클리어
+        # (페어 수가 14개로 적어 부작용 미미, 다음 호출에서 새로 시도)
+        try:
+            _cached_compare_kr_us_inner.clear()
+        except Exception:
+            pass
+    return res
 
 
 def render_kr_us_result(pair: dict, result: dict):
