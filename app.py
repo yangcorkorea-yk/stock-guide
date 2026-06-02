@@ -97,6 +97,7 @@ def toggle_watch(symbol):
 HOT_THEMES_PATH = Path(__file__).resolve().parent / "data" / "hot_themes.json"
 BRIEFING_PATH = Path(__file__).resolve().parent / "data" / "market_briefing.json"
 EVENT_BRIEFING_PATH = Path(__file__).resolve().parent / "data" / "event_briefings.json"
+SECTOR_HEATMAP_PATH = Path(__file__).resolve().parent / "data" / "sector_heatmap.json"
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -309,10 +310,17 @@ def cached_upcoming_earnings(symbols_tuple, days=30):
     return upcoming_earnings_for_symbols(list(symbols_tuple), days=days)
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def cached_sector_heatmap():
-    """22개 카탈로그 섹터 히트맵 (6시간 캐시 — 호출량 무거우므로 길게)."""
-    return sector_heatmap_data()
+    """미리 계산된 JSON에서 섹터 히트맵 로드 (GH Actions 일일 갱신).
+    실시간 계산은 호출량이 커서 페이지 응답 타임아웃 발생 → JSON 우선.
+    파일 없으면 None.
+    """
+    try:
+        data = json.loads(SECTOR_HEATMAP_PATH.read_text(encoding="utf-8"))
+        return data  # {generated_at, sectors[]}
+    except Exception:
+        return None
 
 
 def _pct_to_color(pct, max_abs=8.0):
@@ -326,12 +334,15 @@ def _pct_to_color(pct, max_abs=8.0):
 
 
 def render_sector_heatmap():
-    """섹터 로테이션 히트맵 (HTML 테이블, 3개월 수익률 강한 순)."""
-    data = cached_sector_heatmap()
-    if not data:
-        st.caption("섹터 히트맵 데이터를 못 받았어요. (Alpaca 시세 일시 장애)")
+    """섹터 로테이션 히트맵 (미리 계산된 JSON, 3개월 수익률 강한 순)."""
+    blob = cached_sector_heatmap()
+    if not blob or not blob.get("sectors"):
+        st.info("📭 섹터 히트맵 데이터가 아직 없어요. "
+                "GitHub Actions → 'Daily — Sector Heatmap' → Run workflow 로 첫 생성 가능.")
         return
-    data = sorted(data, key=lambda x: -(x.get("m3") if x.get("m3") is not None else -999))
+    data = sorted(blob["sectors"],
+                  key=lambda x: -(x.get("m3") if x.get("m3") is not None else -999))
+    gen_at = blob.get("generated_at", "")
 
     head = (
         '<tr style="font-size:0.78rem;opacity:0.65;">'
@@ -378,8 +389,9 @@ def render_sector_heatmap():
         f'{head}{rows}</table>',
         unsafe_allow_html=True,
     )
-    st.caption("우리 카탈로그 22개 섹터 · 3개월 수익률 강한 순 · 각 그룹 종목 동일 가중 평균. "
-               "괄호 안은 평균에 쓰인 종목 수. 색이 진할수록 큰 변동 (초록=상승, 빨강=하락).")
+    _g = f"갱신 {gen_at[:10]} · " if gen_at else ""
+    st.caption(f"{_g}우리 카탈로그 22개 섹터 · 3개월 수익률 강한 순 · "
+               f"각 그룹 상위 5종목 평균. 색이 진할수록 큰 변동 (초록=상승, 빨강=하락).")
 
 
 def render_earnings_cards(earnings: list[dict]):
@@ -1060,8 +1072,8 @@ with tab1:
 
 # ── 탭 2: 섹터 탐색 ──────────────────────────────
 with tab2:
-    with st.expander("🔥 섹터 로테이션 히트맵 — 지금 어떤 섹터가 강한가  "
-                     "(눌러서 펼치기)"):
+    with st.expander("🔥 섹터 로테이션 히트맵 — 지금 어떤 섹터가 강한가",
+                     expanded=True):
         render_sector_heatmap()
 
     st.write("관심 있는 **섹터**를 고르면, 그 안 대표 종목들의 현재 상태가 한눈에 보여요.")
