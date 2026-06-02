@@ -336,34 +336,44 @@ def render_sector_heatmap():
     head = (
         '<tr style="font-size:0.78rem;opacity:0.65;">'
         '<th style="text-align:left;padding:8px 10px;">섹터</th>'
-        '<th style="text-align:right;padding:8px 10px;">1주</th>'
-        '<th style="text-align:right;padding:8px 10px;">1개월</th>'
-        '<th style="text-align:right;padding:8px 10px;">3개월</th>'
+        '<th style="text-align:right;padding:8px 6px;">1주</th>'
+        '<th style="text-align:right;padding:8px 6px;">1개월</th>'
+        '<th style="text-align:right;padding:8px 6px;">3개월</th>'
         '</tr>'
     )
     rows = ""
     for r in data:
         row = (
-            f'<td style="padding:9px 10px;font-weight:500;">'
+            f'<td style="padding:9px 10px;font-weight:500;white-space:nowrap;'
+            f'overflow:hidden;text-overflow:ellipsis;">'
             f'{r["name"]} <span style="opacity:0.45;font-size:0.78rem;">({r["symbol"]})</span></td>'
         )
         for k in ("w1", "m1", "m3"):
             v = r.get(k)
             if v is None:
-                row += '<td style="padding:9px 10px;text-align:right;opacity:0.4;">—</td>'
+                row += ('<td style="padding:9px 6px;text-align:right;opacity:0.4;'
+                        'white-space:nowrap;">—</td>')
             else:
                 bg = _pct_to_color(v)
                 sign = "+" if v >= 0 else ""
                 row += (
-                    f'<td style="padding:9px 10px;text-align:right;background:{bg};'
-                    f'font-weight:600;font-size:0.9rem;border-radius:4px;">'
+                    f'<td style="padding:9px 6px;text-align:right;background:{bg};'
+                    f'font-weight:600;font-size:0.88rem;border-radius:4px;'
+                    f'white-space:nowrap;">'
                     f'{sign}{v:.2f}%</td>'
                 )
         rows += f'<tr>{row}</tr>'
 
     st.markdown(
-        f'<table style="width:100%;border-collapse:separate;border-spacing:2px 2px;'
-        f'font-size:0.9rem;">{head}{rows}</table>',
+        f'<table style="width:100%;border-collapse:separate;border-spacing:2px;'
+        f'table-layout:fixed;font-size:0.9rem;">'
+        f'<colgroup>'
+        f'<col style="width:40%;">'
+        f'<col style="width:20%;">'
+        f'<col style="width:20%;">'
+        f'<col style="width:20%;">'
+        f'</colgroup>'
+        f'{head}{rows}</table>',
         unsafe_allow_html=True,
     )
     st.caption("11개 GICS 섹터 ETF · 3개월 수익률 강한 순 · 색이 진할수록 큰 변동 "
