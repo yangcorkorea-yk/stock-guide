@@ -26,7 +26,8 @@ def _looks_like_ticker(s: str) -> bool:
 from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
-                      find_peer_group, market_context)
+                      find_peer_group, market_context, upcoming_earnings_for_symbols,
+                      _humanize_cap)
 from news_client import fetch_news
 from llm_client import (summarize_news_ko, translate_headlines_ko,
                         synthesize_analysis_ko, compare_stocks_ko)
@@ -300,6 +301,62 @@ def _build_compare_payload(symbol):
         ex = f" (D-{d})" if isinstance(d, int) and d >= 0 else ""
         lines.append(f"- 다음 실적 발표 {brief['earnings_date']}{ex}")
     return "\n".join(lines)
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def cached_upcoming_earnings(symbols_tuple, days=30):
+    """주어진 종목들의 다가오는 실적 일정 (6시간 캐시)."""
+    return upcoming_earnings_for_symbols(list(symbols_tuple), days=days)
+
+
+def render_earnings_cards(earnings: list[dict]):
+    """다가오는 실적 카드 그리드. earnings: upcoming_earnings_for_symbols 결과."""
+    if not earnings:
+        return
+    items_html = ""
+    HOUR_KO = {"bmo": "장 개장 전", "amc": "장 마감 후", "dmt": "장 중"}
+    for e in earnings:
+        sym = e["symbol"]
+        kn = TICKER_NAMES.get(sym, sym)
+        name = kn.split()[0] if sym in TICKER_NAMES else sym
+        days = e["days_until"]
+        if days == 0:
+            d_label, d_color = "오늘 발표", "#ef4444"
+        elif days <= 3:
+            d_label, d_color = f"D-{days}", "#f59e0b"
+        elif days <= 7:
+            d_label, d_color = f"D-{days}", "#3b82f6"
+        else:
+            d_label, d_color = f"D-{days}", "#6b7280"
+        eps = (f"${e['eps_estimate']:.2f}"
+               if isinstance(e.get("eps_estimate"), (int, float)) else "—")
+        rev_v = e.get("revenue_estimate")
+        rev = _humanize_cap(rev_v) if isinstance(rev_v, (int, float)) else "—"
+        hour_ko = HOUR_KO.get(e.get("hour", ""), "")
+        hour_html = f" · {hour_ko}" if hour_ko else ""
+        items_html += (
+            f'<div style="flex:1 1 calc(50% - 8px);min-width:240px;'
+            f'padding:14px 16px;background:rgba(255,255,255,0.04);'
+            f'border-radius:10px;border:1px solid rgba(99,102,241,0.15);">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'margin-bottom:8px;gap:8px;">'
+            f'<div style="font-size:1rem;font-weight:700;line-height:1.3;">'
+            f'{name} <span style="opacity:0.55;font-size:0.85rem;font-weight:500;">({sym})</span></div>'
+            f'<div style="padding:4px 10px;background:{d_color}22;color:{d_color};'
+            f'border-radius:14px;font-size:0.85rem;font-weight:700;white-space:nowrap;">{d_label}</div>'
+            f'</div>'
+            f'<div style="font-size:0.85rem;opacity:0.7;margin-bottom:8px;">'
+            f'{e["date"]}{hour_html}</div>'
+            f'<div style="font-size:0.85rem;line-height:1.6;">'
+            f'<span style="opacity:0.65;">컨센 EPS</span> <strong>{eps}</strong>'
+            f'　·　<span style="opacity:0.65;">매출</span> <strong>{rev}</strong>'
+            f'</div>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px 0;">{items_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -849,8 +906,8 @@ if _events:
                        "[BEA](https://www.bea.gov/news/schedule) 공식 캘린더에서 확인하세요.")
 
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["🔍 검색", "📂 섹터", "📂 테마", "🔥 뜨는", "⚖️ 비교"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["🔍 검색", "📂 섹터", "📂 테마", "🔥 뜨는", "⚖️ 비교", "📅 어닝"]
 )
 
 # ── 탭 1: 종목 검색 ──────────────────────────────
@@ -1166,6 +1223,48 @@ with tab5:
                 st.caption("AI 분석 실패 (ANTHROPIC_API_KEY 미설정 또는 호출 실패).")
         elif not failed:
             st.info("비교 가능한 종목 데이터가 부족해요.")
+
+# ── 탭 6: 어닝 컴파스 ──────────────────────────
+with tab6:
+    st.write("**관심종목**과 주요 빅테크의 **다가오는 실적 발표 일정**을 한눈에.")
+    st.caption("D-N · 컨센서스 EPS · 매출 추정치. 변동성 큰 이벤트라 일정을 알고 들어가요.")
+
+    _wl_e = get_watchlist()
+
+    # 인기 관찰 종목 (관심종목 없을 때 또는 추가로 노출)
+    _popular = []
+    for _grp in ("AI · 빅테크", "반도체", "헬스케어 · 제약", "핀테크 · 결제",
+                 "클라우드 · SaaS"):
+        for _s in SECTORS.get(_grp, [])[:5]:
+            if _s not in _popular:
+                _popular.append(_s)
+    _popular = _popular[:25]  # Finnhub 호출 절제
+
+    # ⭐ 관심종목 영역
+    if _wl_e:
+        st.markdown("**⭐ 내 관심종목**")
+        with st.spinner("실적 일정 조회 중..."):
+            _wl_earnings = cached_upcoming_earnings(tuple(_wl_e), 30)
+        if _wl_earnings:
+            render_earnings_cards(_wl_earnings)
+        else:
+            st.caption("내 관심종목 중 30일 안에 발표 예정인 게 없어요.")
+    else:
+        st.info("⭐ 종목 상세에서 관심종목에 담아두면 여기에 발표 일정이 떠요.")
+
+    # 🔥 주요 빅테크/반도체
+    st.markdown("**🔥 주요 종목 (빅테크·반도체·헬스케어·핀테크·클라우드)**")
+    with st.spinner("주요 종목 실적 일정 조회 중..."):
+        _pop_earnings = cached_upcoming_earnings(tuple(_popular), 30)
+    # 관심종목과 중복 제거
+    _pop_earnings = [e for e in _pop_earnings if e["symbol"] not in _wl_e]
+    if _pop_earnings:
+        render_earnings_cards(_pop_earnings)
+    else:
+        st.caption("주요 종목 중 30일 안에 발표 예정인 게 없어요. "
+                   "(데이터 출처: Finnhub — `FINNHUB_KEY` 미설정 시 비어 있을 수 있어요)")
+
+    st.caption("발표일·컨센서스 출처: Finnhub. 'D-N'은 오늘 기준 남은 일수.")
 
 st.divider()
 st.caption("⚠️ 이 앱은 투자조언이 아니며 정보·교육 목적입니다. "
