@@ -1231,41 +1231,48 @@ with tab4:
 
 # ── 탭 5: 종목 비교 AI ──────────────────────────
 def render_kr_us_pairs_ui():
-    """한국 vs 미국 페어 비교 UI (tab5 내부에서 호출)."""
+    """한국 vs 미국 페어 비교 UI — pills 컴팩트 + 선택 즉시 결과."""
     st.caption("자주 비교되는 한·미 페어를 골라 AI 분석을 받아요. 예측·매매 권유 아님.")
-    st.session_state.setdefault("kr_us_pair_key", None)
 
-    by_theme = {}
+    # 짧은 라벨로 컴팩트 pills (테마 이모지 prefix로 시각 그룹화)
+    labels = []
     for p in KR_US_PAIRS:
-        by_theme.setdefault(p["theme"], []).append(p)
+        emoji = (p["theme"].split()[0] if p.get("theme") else "")
+        kr_short = (p["kr"]["name"]
+                    .replace("삼성바이오로직스", "삼바")
+                    .replace("LG에너지솔루션", "LG엔솔")
+                    .replace("두산에너빌리티", "두산E")
+                    .replace("엔씨소프트", "엔씨")
+                    .replace("한화솔루션", "한화솔"))
+        us_short = (p["us"]["name"]
+                    .replace("일렉트로닉아츠", "EA")
+                    .replace("일라이릴리", "릴리")
+                    .replace("퍼스트솔라", "FSLR")
+                    .replace("GE 버노바", "GE버노바")
+                    .replace("워너뮤직", "워너뮤직"))
+        labels.append(f"{emoji} {kr_short} vs {us_short}")
 
-    for theme, pairs in by_theme.items():
-        st.markdown(f"**{theme}**")
-        cols = st.columns(min(len(pairs), 2))
-        for i, p in enumerate(pairs):
-            key = f"{p['kr']['ticker']}|{p['us']['ticker']}"
-            label = f"{p['kr']['name']} 🇰🇷 vs 🇺🇸 {p['us']['name']}"
-            if cols[i % len(cols)].button(label, key=f"krus_{key}",
-                                          use_container_width=True):
-                st.session_state.kr_us_pair_key = key
-                st.rerun()
+    selected = st.pills(
+        "한·미 페어", labels, default=None, selection_mode="single",
+        label_visibility="collapsed", key="krus_pair_pills",
+    )
 
-    _sel_key = st.session_state.get("kr_us_pair_key")
-    if _sel_key:
-        kr_t, us_t = _sel_key.split("|", 1)
-        selected = next((p for p in KR_US_PAIRS
-                         if p["kr"]["ticker"] == kr_t and p["us"]["ticker"] == us_t),
-                        None)
-        if selected:
-            st.divider()
-            st.markdown(f"### {selected['kr']['name']} 🇰🇷 vs 🇺🇸 {selected['us']['name']}")
-            st.caption(f"비교 이유: {selected['reason']}")
-            with st.spinner("✨ AI 비교 분석 중..."):
-                result = cached_compare_kr_us(kr_t, us_t)
-            if result:
-                render_kr_us_result(selected, result)
-            else:
-                st.caption("AI 분석 실패 (ANTHROPIC_API_KEY 미설정 또는 호출 실패).")
+    if not selected:
+        st.info("👆 위 페어 중 하나를 톡 누르면 AI 비교 분석이 바로 보여요.")
+        return
+
+    pair = KR_US_PAIRS[labels.index(selected)]
+    st.divider()
+    st.markdown(
+        f"### {pair['theme']}　{pair['kr']['name']} 🇰🇷 vs 🇺🇸 {pair['us']['name']}"
+    )
+    st.caption(f"비교 이유: {pair['reason']}")
+    with st.spinner("✨ AI 비교 분석 중..."):
+        result = cached_compare_kr_us(pair["kr"]["ticker"], pair["us"]["ticker"])
+    if result:
+        render_kr_us_result(pair, result)
+    else:
+        st.caption("AI 분석 실패 (ANTHROPIC_API_KEY 미설정 또는 호출 실패).")
 
 
 with tab5:
