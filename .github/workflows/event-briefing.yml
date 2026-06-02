@@ -1,0 +1,44 @@
+name: Daily — Event Briefing (FOMC/CPI/PCE 등)
+
+on:
+  schedule:
+    # 매일 22:00 UTC = KST 07:00 (시장 브리핑 30분 후, 거시 발표 결과 확정 후)
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Generate event briefing
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL_ANALYSIS: ${{ vars.ANTHROPIC_MODEL_ANALYSIS || 'claude-sonnet-4-6' }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: python scripts/refresh_event_briefing.py
+
+      - name: Commit JSON if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/event_briefings.json)" ]; then
+            git add data/event_briefings.json
+            git commit -m "chore(data): refresh event_briefings [skip ci]"
+            git push
+          else
+            echo "변경 없음 (어제 이벤트 없거나 갱신 불필요)."
+          fi
