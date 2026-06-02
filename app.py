@@ -388,10 +388,10 @@ def show_detail(symbol, df, context=None):
                 items_html += (
                     f'<div title="{tip}" '
                     f'style="flex:1 1 calc(33.33% - 6px);min-width:140px;'
-                    f'padding:10px 12px;background:rgba(255,255,255,0.04);'
+                    f'padding:12px 14px;background:rgba(255,255,255,0.04);'
                     f'border-radius:10px;cursor:help;">'
-                    f'<div style="font-size:0.85rem;color:#9aa0a6;margin-bottom:4px;">{label}</div>'
-                    f'<div style="font-size:1.3rem;font-weight:600;line-height:1.2;'
+                    f'<div style="font-size:0.9rem;color:#9aa0a6;margin-bottom:6px;">{label}</div>'
+                    f'<div style="font-size:1.55rem;font-weight:600;line-height:1.2;'
                     f'word-break:break-all;">{value}</div>'
                     f'</div>'
                 )
