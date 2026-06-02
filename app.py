@@ -1127,12 +1127,16 @@ if _events:
         fails = meta.get("refresh_failures") or []
         if last:
             tag = f"자동 갱신: {last[:10]}"
-            if fails:
-                tag += f"  ·  ⚠️ 일부 소스 추출 실패: {', '.join(fails)}"
             st.caption(tag + "  ·  출처: "
                        "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
                        "[BLS](https://www.bls.gov/schedule/news_release/) · "
                        "[BEA](https://www.bea.gov/news/schedule)")
+            if fails:
+                st.caption(
+                    f"💡 {', '.join(fails)} 일정 자동 추출이 일시 실패해 "
+                    "위 항목 중 일부는 패턴 기반 추정(⚠️ 추정)으로 보충했어요. "
+                    "매월 1일 다시 시도합니다."
+                )
         else:
             st.caption("⚠️ 일정은 패턴 기반 추정치예요. 실제 발표일은 "
                        "[Fed](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) · "
