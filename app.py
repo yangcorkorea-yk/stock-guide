@@ -309,9 +309,9 @@ def cached_upcoming_earnings(symbols_tuple, days=30):
     return upcoming_earnings_for_symbols(list(symbols_tuple), days=days)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=21600, show_spinner=False)
 def cached_sector_heatmap():
-    """11개 GICS 섹터 ETF 히트맵 데이터 (1시간 캐시)."""
+    """22개 카탈로그 섹터 히트맵 (6시간 캐시 — 호출량 무거우므로 길게)."""
     return sector_heatmap_data()
 
 
@@ -1060,7 +1060,8 @@ with tab1:
 
 # ── 탭 2: 섹터 탐색 ──────────────────────────────
 with tab2:
-    with st.expander("🔥 섹터 로테이션 히트맵 — 지금 어떤 섹터가 강한가", expanded=True):
+    with st.expander("🔥 섹터 로테이션 히트맵 — 지금 어떤 섹터가 강한가  "
+                     "(눌러서 펼치기)"):
         render_sector_heatmap()
 
     st.write("관심 있는 **섹터**를 고르면, 그 안 대표 종목들의 현재 상태가 한눈에 보여요.")

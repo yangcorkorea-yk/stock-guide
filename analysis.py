@@ -606,13 +606,14 @@ def _humanize_cap_millions(v):
 def sector_heatmap_data() -> list[dict]:
     """
     SECTORS 카탈로그(22개 그룹)의 평균 수익률.
-    각 그룹 내 종목의 1주(5거래일)/1개월(21)/3개월(63) 수익률을 동일 가중 평균.
+    각 그룹 내 **상위 5개 종목**의 1주(5거래일)/1개월(21)/3개월(63) 수익률을
+    동일 가중 평균. (호출량 절감 — 그룹 대표 종목으로 대체)
     반환: [{name, w1, m1, m3, n}, ...]  (n = 평균에 사용된 종목 수)
     """
     out = []
     for name, syms in SECTORS.items():
         w1, m1, m3 = [], [], []
-        for s in syms:
+        for s in syms[:5]:  # 상위 5개만 (호출량 절감)
             try:
                 df = get_bars(s, days=200)
                 if df is None or len(df) < 6:
