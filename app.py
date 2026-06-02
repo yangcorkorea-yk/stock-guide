@@ -653,17 +653,18 @@ if _brief and _brief.get("briefing"):
     _bd = _brief.get("briefing").strip().replace("\n", "<br>")
     _md = _brief.get("market_date") or ""
     st.markdown(
-        f'<div style="padding:16px 20px;'
+        f'<details style="padding:14px 18px;'
         f'background:linear-gradient(135deg,rgba(99,102,241,0.10),rgba(168,85,247,0.06));'
         f'border-left:4px solid #6366f1;border-radius:10px;margin-bottom:14px;">'
-        f'<div style="font-size:0.8rem;color:#9aa0a6;margin-bottom:6px;'
-        f'letter-spacing:0.02em;">📰 오늘의 시장 브리핑</div>'
-        f'<div style="font-size:1.15rem;font-weight:700;margin-bottom:10px;'
-        f'line-height:1.35;">{_hl}</div>'
-        f'<div style="font-size:0.95rem;line-height:1.65;color:#dee2e6;">{_bd}</div>'
-        f'<div style="font-size:0.72rem;color:#868e96;margin-top:12px;">'
+        f'<summary style="list-style:none;cursor:pointer;outline:none;">'
+        f'<div style="font-size:0.78rem;color:#6366f1;margin-bottom:4px;'
+        f'letter-spacing:0.02em;font-weight:600;">📰 오늘의 시장 브리핑　<span style="font-size:0.7rem;opacity:0.6;">▾ 클릭해서 펼치기</span></div>'
+        f'<div style="font-size:1.1rem;font-weight:700;line-height:1.4;">{_hl}</div>'
+        f'</summary>'
+        f'<div style="font-size:0.95rem;line-height:1.7;margin-top:12px;">{_bd}</div>'
+        f'<div style="font-size:0.72rem;opacity:0.6;margin-top:10px;">'
         f'기준일 {_md} · AI 분석 · 예측·매매 권유 아님</div>'
-        f'</div>',
+        f'</details>',
         unsafe_allow_html=True,
     )
 
