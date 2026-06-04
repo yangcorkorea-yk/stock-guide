@@ -109,36 +109,43 @@ CANDLE_DEFS = {
         "direction": "강세",
         "desc": "아래꼬리 긴 캔들 — 내렸다가 매수세가 되받침. 추세 끝에서 나타나면 강세 반전 후보.",
         "caveat": "추세 끝(과매도)에서 거래량 동반될 때만 신뢰. 거래량 없이는 우연일 가능성.",
+        "glossary_key": "망치형",
     },
     "유성형": {
         "direction": "약세",
         "desc": "위꼬리 긴 캔들 — 올랐다가 매도세에 눌림. 추세 끝에서 약세 반전 후보.",
         "caveat": "추세 끝(과열)에서 거래량 동반될 때만 신뢰.",
+        "glossary_key": "유성형",
     },
     "상승장악형": {
         "direction": "강세",
         "desc": "어제 음봉을 오늘 양봉이 완전히 감쌈. 매수세 우위 전환 신호.",
         "caveat": "하락 추세 끝에서 나와야 의미. 횡보 중에는 약한 신호.",
+        "glossary_key": "상승장악형",
     },
     "하락장악형": {
         "direction": "약세",
         "desc": "어제 양봉을 오늘 음봉이 완전히 감쌈. 매도세 우위 전환 신호.",
         "caveat": "상승 추세 끝에서 나와야 의미. 횡보 중에는 약한 신호.",
+        "glossary_key": "하락장악형",
     },
     "샛별형": {
         "direction": "강세",
         "desc": "큰 음봉 → 망설임(작은 몸통) → 큰 양봉. 3봉짜리 바닥권 반전 신호.",
         "caveat": "3일짜리라 확인까지 시간 걸림. 4번째 봉에서도 추세 이어져야 진짜.",
+        "glossary_key": "샛별형",
     },
     "석별형": {
         "direction": "약세",
         "desc": "큰 양봉 → 망설임 → 큰 음봉. 3봉짜리 천장권 반전 신호.",
         "caveat": "확인까지 시간 걸림. 다음 봉 흐름 같이 봐야.",
+        "glossary_key": "석별형",
     },
     "도지": {
         "direction": "중립",
         "desc": "시가≈종가 — 매수·매도 힘이 균형. 추세 끝에 나오면 전환 신호로 자주 거론.",
         "caveat": "단독으론 약함. 위치(과열/과매도 구간)와 거래량 함께 봐야.",
+        "glossary_key": "도지",
     },
 }
 
@@ -234,6 +241,7 @@ def detect_ma_crosses(df: pd.DataFrame, lookback: int = 10) -> list[dict]:
                     "date": d,
                     "desc": "50일선이 200일선을 위로 뚫음. 장기 추세 강세 전환의 대표 신호.",
                     "caveat": "후행지표 — 신호 발생 시점엔 이미 한참 오른 뒤일 수 있음. 200일선이 아직 하락 중이면 가짜 신호 가능.",
+                    "glossary_key": "골든크로스",
                 })
             else:
                 results.append({
@@ -243,6 +251,7 @@ def detect_ma_crosses(df: pd.DataFrame, lookback: int = 10) -> list[dict]:
                     "date": d,
                     "desc": "50일선이 200일선을 아래로 뚫음. 장기 추세 약세 전환의 대표 신호.",
                     "caveat": "후행지표 — 200일선이 아직 상승 중이면 흔들리지 마세요. 휩쏘(가짜 신호) 가능.",
+                    "glossary_key": "데드크로스",
                 })
 
     cr = _find_cross(ma20, ma60, lookback)
@@ -257,6 +266,7 @@ def detect_ma_crosses(df: pd.DataFrame, lookback: int = 10) -> list[dict]:
                 "date": d,
                 "desc": "20일선이 60일선을 위로 뚫음. 단기 추세 전환 후보.",
                 "caveat": "장기 크로스보다 빨리 잡히지만 그만큼 휩쏘도 잦음. 거래량 동반 여부 같이 보세요.",
+                "glossary_key": "골든크로스",
             })
         else:
             results.append({
@@ -266,6 +276,7 @@ def detect_ma_crosses(df: pd.DataFrame, lookback: int = 10) -> list[dict]:
                 "date": d,
                 "desc": "20일선이 60일선을 아래로 뚫음. 단기 추세 약화 후보.",
                 "caveat": "장기 추세가 살아있으면 흔들리지 마세요. 휩쏘 가능.",
+                "glossary_key": "데드크로스",
             })
 
     return results
@@ -310,6 +321,7 @@ def detect_breakouts(df: pd.DataFrame, lookback: int = 5) -> list[dict]:
                 "date": d,
                 "desc": f"종가가 최근 {'52주' if is_52w else '20일'} 고점을 넘김 + 거래량 평균×1.5 이상. 진짜 돌파 신호로 자주 거론.",
                 "caveat": "돌파 후 그 자리까지 눌렸다 다시 위로 가야 '진짜'. 거래량 없이 박스 안으로 회귀하면 가짜.",
+                "glossary_key": "거래량 동반 돌파",
             })
 
         if close < prev_low_20 and vol >= vma * 1.5:
@@ -320,6 +332,7 @@ def detect_breakouts(df: pd.DataFrame, lookback: int = 5) -> list[dict]:
                 "date": d,
                 "desc": "종가가 최근 20일 저점을 깸 + 거래량 평균×1.5 이상. 지지 이탈 신호.",
                 "caveat": "단발성 패닉성 하락일 수 있음. 다음 날 회복하는지 같이 보세요.",
+                "glossary_key": "신저가 이탈",
             })
 
     return results
