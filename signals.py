@@ -1,0 +1,362 @@
+"""
+일봉 데이터에서 교과서 기술적 신호를 룰 기반으로 감지.
+
+핵심 원칙 (프로젝트 CLAUDE.md):
+- 예측·매수/매도 라벨 금지 → "강세 반전 후보 / 약세 반전 후보" 같은 서술형
+- 후행지표·오탐 가능성은 caveat에 솔직히 표시
+- 최근 N일 안에서만 감지 (오래된 신호는 의미 없음)
+
+반환 스키마 (모든 detect_* 함수):
+  {
+    "name": "한국어 이름 (예: '망치형')",
+    "kind": "candle | cross | breakout",
+    "direction": "강세 | 약세 | 중립",
+    "date": "YYYY-MM-DD",
+    "desc": "한 줄 설명",
+    "caveat": "한계·주의사항",
+  }
+"""
+from __future__ import annotations
+
+import pandas as pd
+import numpy as np
+from typing import Optional
+
+
+# ──────────────────────────────────────────────
+# 캔들 패턴 (반전 신호)
+# ──────────────────────────────────────────────
+def _candle_anatomy(row) -> dict:
+    o, c, h, l = float(row['open']), float(row['close']), float(row['high']), float(row['low'])
+    body = abs(c - o)
+    upper = h - max(o, c)
+    lower = min(o, c) - l
+    total = h - l
+    return {
+        "o": o, "c": c, "h": h, "l": l,
+        "body": body, "upper": upper, "lower": lower, "total": total,
+        "is_up": c >= o,
+    }
+
+
+def _is_hammer(a: dict) -> bool:
+    """망치형 — 아래꼬리 ≥ 몸통×2, 위꼬리 작음, 몸통이 봉 상단에 위치."""
+    if a["total"] == 0 or a["body"] == 0:
+        return False
+    return (a["lower"] >= a["body"] * 2
+            and a["upper"] <= a["body"] * 0.5
+            and a["body"] / a["total"] >= 0.1)
+
+
+def _is_shooting_star(a: dict) -> bool:
+    """유성형 — 위꼬리 ≥ 몸통×2, 아래꼬리 작음."""
+    if a["total"] == 0 or a["body"] == 0:
+        return False
+    return (a["upper"] >= a["body"] * 2
+            and a["lower"] <= a["body"] * 0.5
+            and a["body"] / a["total"] >= 0.1)
+
+
+def _is_bullish_engulfing(prev: dict, curr: dict) -> bool:
+    """상승장악형 — 어제 음봉, 오늘 양봉이 어제 몸통을 감쌈."""
+    if prev["is_up"] or not curr["is_up"]:
+        return False
+    return (curr["o"] <= prev["c"]
+            and curr["c"] >= prev["o"]
+            and curr["body"] > prev["body"])
+
+
+def _is_bearish_engulfing(prev: dict, curr: dict) -> bool:
+    """하락장악형 — 어제 양봉, 오늘 음봉이 어제 몸통을 감쌈."""
+    if not prev["is_up"] or curr["is_up"]:
+        return False
+    return (curr["o"] >= prev["c"]
+            and curr["c"] <= prev["o"]
+            and curr["body"] > prev["body"])
+
+
+def _is_morning_star(d1: dict, d2: dict, d3: dict) -> bool:
+    """샛별형 — 큰 음봉 → 작은 몸통 → 큰 양봉 (D1 중점 위에서 마감)."""
+    if d1["is_up"] or not d3["is_up"]:
+        return False
+    if d1["total"] == 0 or d3["total"] == 0:
+        return False
+    small = d2["body"] <= d1["body"] * 0.5
+    midpoint_d1 = (d1["o"] + d1["c"]) / 2
+    return small and d3["c"] >= midpoint_d1
+
+
+def _is_evening_star(d1: dict, d2: dict, d3: dict) -> bool:
+    """석별형 — 큰 양봉 → 작은 몸통 → 큰 음봉."""
+    if not d1["is_up"] or d3["is_up"]:
+        return False
+    if d1["total"] == 0 or d3["total"] == 0:
+        return False
+    small = d2["body"] <= d1["body"] * 0.5
+    midpoint_d1 = (d1["o"] + d1["c"]) / 2
+    return small and d3["c"] <= midpoint_d1
+
+
+def _is_doji(a: dict) -> bool:
+    """도지 — 몸통이 봉 전체의 10% 이하."""
+    if a["total"] == 0:
+        return False
+    return a["body"] / a["total"] <= 0.1
+
+
+CANDLE_DEFS = {
+    "망치형": {
+        "direction": "강세",
+        "desc": "아래꼬리 긴 캔들 — 내렸다가 매수세가 되받침. 추세 끝에서 나타나면 강세 반전 후보.",
+        "caveat": "추세 끝(과매도)에서 거래량 동반될 때만 신뢰. 거래량 없이는 우연일 가능성.",
+    },
+    "유성형": {
+        "direction": "약세",
+        "desc": "위꼬리 긴 캔들 — 올랐다가 매도세에 눌림. 추세 끝에서 약세 반전 후보.",
+        "caveat": "추세 끝(과열)에서 거래량 동반될 때만 신뢰.",
+    },
+    "상승장악형": {
+        "direction": "강세",
+        "desc": "어제 음봉을 오늘 양봉이 완전히 감쌈. 매수세 우위 전환 신호.",
+        "caveat": "하락 추세 끝에서 나와야 의미. 횡보 중에는 약한 신호.",
+    },
+    "하락장악형": {
+        "direction": "약세",
+        "desc": "어제 양봉을 오늘 음봉이 완전히 감쌈. 매도세 우위 전환 신호.",
+        "caveat": "상승 추세 끝에서 나와야 의미. 횡보 중에는 약한 신호.",
+    },
+    "샛별형": {
+        "direction": "강세",
+        "desc": "큰 음봉 → 망설임(작은 몸통) → 큰 양봉. 3봉짜리 바닥권 반전 신호.",
+        "caveat": "3일짜리라 확인까지 시간 걸림. 4번째 봉에서도 추세 이어져야 진짜.",
+    },
+    "석별형": {
+        "direction": "약세",
+        "desc": "큰 양봉 → 망설임 → 큰 음봉. 3봉짜리 천장권 반전 신호.",
+        "caveat": "확인까지 시간 걸림. 다음 봉 흐름 같이 봐야.",
+    },
+    "도지": {
+        "direction": "중립",
+        "desc": "시가≈종가 — 매수·매도 힘이 균형. 추세 끝에 나오면 전환 신호로 자주 거론.",
+        "caveat": "단독으론 약함. 위치(과열/과매도 구간)와 거래량 함께 봐야.",
+    },
+}
+
+
+def detect_candles(df: pd.DataFrame, lookback: int = 10) -> list[dict]:
+    """최근 lookback 일 안에서 캔들 패턴 감지."""
+    if len(df) < 4:
+        return []
+    results = []
+    start = max(0, len(df) - lookback)
+    # 단일·2봉 패턴
+    for i in range(max(start, 1), len(df)):
+        curr = _candle_anatomy(df.iloc[i])
+        prev = _candle_anatomy(df.iloc[i - 1])
+        d = str(df.index[i].date())
+        if _is_hammer(curr):
+            results.append({"name": "망치형", "kind": "candle", "date": d, **CANDLE_DEFS["망치형"]})
+        if _is_shooting_star(curr):
+            results.append({"name": "유성형", "kind": "candle", "date": d, **CANDLE_DEFS["유성형"]})
+        if _is_doji(curr):
+            results.append({"name": "도지", "kind": "candle", "date": d, **CANDLE_DEFS["도지"]})
+        if _is_bullish_engulfing(prev, curr):
+            results.append({"name": "상승장악형", "kind": "candle", "date": d, **CANDLE_DEFS["상승장악형"]})
+        if _is_bearish_engulfing(prev, curr):
+            results.append({"name": "하락장악형", "kind": "candle", "date": d, **CANDLE_DEFS["하락장악형"]})
+    # 3봉 패턴
+    for i in range(max(start, 2), len(df)):
+        d1 = _candle_anatomy(df.iloc[i - 2])
+        d2 = _candle_anatomy(df.iloc[i - 1])
+        d3 = _candle_anatomy(df.iloc[i])
+        d = str(df.index[i].date())
+        if _is_morning_star(d1, d2, d3):
+            results.append({"name": "샛별형", "kind": "candle", "date": d, **CANDLE_DEFS["샛별형"]})
+        if _is_evening_star(d1, d2, d3):
+            results.append({"name": "석별형", "kind": "candle", "date": d, **CANDLE_DEFS["석별형"]})
+    return results
+
+
+# ──────────────────────────────────────────────
+# 이동평균선 크로스
+# ──────────────────────────────────────────────
+def _find_cross(short: pd.Series, long: pd.Series, lookback: int) -> Optional[tuple[str, int]]:
+    """
+    short가 long을 위로 뚫은 가장 최근 시점 → ("golden", index)
+    아래로 뚫은 가장 최근 시점 → ("dead", index)
+    lookback 안에 없으면 None.
+    """
+    if len(short) < 2:
+        return None
+    diff = short - long
+    sign = np.sign(diff)
+    # 마지막 lookback 구간에서 부호 전환점 찾기
+    start = max(1, len(diff) - lookback)
+    last_cross = None
+    for i in range(start, len(diff)):
+        if pd.isna(sign.iloc[i]) or pd.isna(sign.iloc[i - 1]):
+            continue
+        if sign.iloc[i - 1] <= 0 and sign.iloc[i] > 0:
+            last_cross = ("golden", i)
+        elif sign.iloc[i - 1] >= 0 and sign.iloc[i] < 0:
+            last_cross = ("dead", i)
+    return last_cross
+
+
+def detect_ma_crosses(df: pd.DataFrame, lookback: int = 10) -> list[dict]:
+    """
+    두 종류 크로스를 본다:
+      · 50/200 (전통적 골든·데드 크로스 — 장기)
+      · 20/60 (단기 추세 전환 — 빨리 잡힘)
+    """
+    close = df["close"]
+    if len(close) < 200:
+        # 200일 미만이면 장기 크로스는 못 봄
+        ma50, ma200 = None, None
+    else:
+        ma50 = close.rolling(50).mean()
+        ma200 = close.rolling(200).mean()
+    ma20 = close.rolling(20).mean()
+    ma60 = close.rolling(60).mean()
+
+    results = []
+
+    if ma50 is not None and ma200 is not None:
+        cr = _find_cross(ma50, ma200, lookback)
+        if cr:
+            kind, i = cr
+            d = str(df.index[i].date())
+            if kind == "golden":
+                results.append({
+                    "name": "골든크로스 (50일·200일)",
+                    "kind": "cross",
+                    "direction": "강세",
+                    "date": d,
+                    "desc": "50일선이 200일선을 위로 뚫음. 장기 추세 강세 전환의 대표 신호.",
+                    "caveat": "후행지표 — 신호 발생 시점엔 이미 한참 오른 뒤일 수 있음. 200일선이 아직 하락 중이면 가짜 신호 가능.",
+                })
+            else:
+                results.append({
+                    "name": "데드크로스 (50일·200일)",
+                    "kind": "cross",
+                    "direction": "약세",
+                    "date": d,
+                    "desc": "50일선이 200일선을 아래로 뚫음. 장기 추세 약세 전환의 대표 신호.",
+                    "caveat": "후행지표 — 200일선이 아직 상승 중이면 흔들리지 마세요. 휩쏘(가짜 신호) 가능.",
+                })
+
+    cr = _find_cross(ma20, ma60, lookback)
+    if cr:
+        kind, i = cr
+        d = str(df.index[i].date())
+        if kind == "golden":
+            results.append({
+                "name": "단기 크로스 (20일·60일 ↑)",
+                "kind": "cross",
+                "direction": "강세",
+                "date": d,
+                "desc": "20일선이 60일선을 위로 뚫음. 단기 추세 전환 후보.",
+                "caveat": "장기 크로스보다 빨리 잡히지만 그만큼 휩쏘도 잦음. 거래량 동반 여부 같이 보세요.",
+            })
+        else:
+            results.append({
+                "name": "단기 크로스 (20일·60일 ↓)",
+                "kind": "cross",
+                "direction": "약세",
+                "date": d,
+                "desc": "20일선이 60일선을 아래로 뚫음. 단기 추세 약화 후보.",
+                "caveat": "장기 추세가 살아있으면 흔들리지 마세요. 휩쏘 가능.",
+            })
+
+    return results
+
+
+# ──────────────────────────────────────────────
+# 거래량 동반 돌파
+# ──────────────────────────────────────────────
+def detect_breakouts(df: pd.DataFrame, lookback: int = 5) -> list[dict]:
+    """
+    최근 lookback 일 안에서:
+      · 신고가(20일/52주) + 거래량 평균×1.5↑ → 강세 돌파
+      · 신저가(20일) + 거래량 평균×1.5↑ → 약세 이탈
+    """
+    if len(df) < 21:
+        return []
+    results = []
+    vol_ma20 = df["volume"].rolling(20).mean()
+    start = max(20, len(df) - lookback)
+    for i in range(start, len(df)):
+        row = df.iloc[i]
+        close = float(row["close"])
+        vol = float(row["volume"])
+        vma = float(vol_ma20.iloc[i]) if not pd.isna(vol_ma20.iloc[i]) else 0
+        if vma == 0:
+            continue
+
+        # 직전 20일 고가·저가 (오늘 제외)
+        prev_high_20 = float(df["high"].iloc[i - 20:i].max())
+        prev_low_20 = float(df["low"].iloc[i - 20:i].min())
+        d = str(df.index[i].date())
+
+        if close > prev_high_20 and vol >= vma * 1.5:
+            # 52주 신고가도 같이 체크
+            tail_252 = df["high"].iloc[max(0, i - 252):i]
+            is_52w = len(tail_252) > 0 and close > float(tail_252.max())
+            label = "52주 신고가 돌파" if is_52w else "20일 신고가 돌파"
+            results.append({
+                "name": f"{label} (거래량 동반)",
+                "kind": "breakout",
+                "direction": "강세",
+                "date": d,
+                "desc": f"종가가 최근 {'52주' if is_52w else '20일'} 고점을 넘김 + 거래량 평균×1.5 이상. 진짜 돌파 신호로 자주 거론.",
+                "caveat": "돌파 후 그 자리까지 눌렸다 다시 위로 가야 '진짜'. 거래량 없이 박스 안으로 회귀하면 가짜.",
+            })
+
+        if close < prev_low_20 and vol >= vma * 1.5:
+            results.append({
+                "name": "20일 신저가 이탈 (거래량 동반)",
+                "kind": "breakout",
+                "direction": "약세",
+                "date": d,
+                "desc": "종가가 최근 20일 저점을 깸 + 거래량 평균×1.5 이상. 지지 이탈 신호.",
+                "caveat": "단발성 패닉성 하락일 수 있음. 다음 날 회복하는지 같이 보세요.",
+            })
+
+    return results
+
+
+# ──────────────────────────────────────────────
+# 종합: 모든 신호 한 번에 + 정리
+# ──────────────────────────────────────────────
+def detect_all(df: pd.DataFrame, lookback: int = 10) -> dict:
+    """
+    반환:
+      {
+        "bullish": [...],   # 강세 신호
+        "bearish": [...],   # 약세 신호
+        "neutral": [...],   # 중립 (도지 등)
+        "lookback_days": int,
+      }
+    각 리스트는 날짜 내림차순 (최근부터).
+    """
+    all_sigs = (
+        detect_candles(df, lookback=lookback)
+        + detect_ma_crosses(df, lookback=lookback)
+        + detect_breakouts(df, lookback=min(lookback, 5))
+    )
+    bullish, bearish, neutral = [], [], []
+    for s in all_sigs:
+        if s["direction"] == "강세":
+            bullish.append(s)
+        elif s["direction"] == "약세":
+            bearish.append(s)
+        else:
+            neutral.append(s)
+    for lst in (bullish, bearish, neutral):
+        lst.sort(key=lambda x: x["date"], reverse=True)
+    return {
+        "bullish": bullish,
+        "bearish": bearish,
+        "neutral": neutral,
+        "lookback_days": lookback,
+    }

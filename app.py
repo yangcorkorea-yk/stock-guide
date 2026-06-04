@@ -34,6 +34,7 @@ from llm_client import (summarize_news_ko, translate_headlines_ko,
                         compare_kr_us_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta, get_tag_info
+from signals import detect_all
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 
@@ -765,6 +766,40 @@ def show_detail(symbol, df, context=None):
         st.markdown(f"- **거래량 (거래쏠림)** 평균의 {rv:.1f}배 — {tag}")
     st.markdown(f"- **추세** {info['trend']}")
     st.caption(f"기준일 {info['date']}　·　거래량은 무료 IEX 피드라 실제보다 작게 나와요 (절대값 말고 '평소 대비'로만 보세요).")
+
+    # ── 최근 포착된 신호 ───────────────────────
+    try:
+        sigs = detect_all(df, lookback=10)
+    except Exception:
+        sigs = None
+    if sigs and (sigs["bullish"] or sigs["bearish"] or sigs["neutral"]):
+        st.subheader("🚦 최근 포착된 신호")
+        st.caption(
+            f"최근 {sigs['lookback_days']}일 동안 일봉에서 보인 교과서 패턴이에요. "
+            "**예측·매수·매도 권유가 아니에요** — '이런 신호가 떴다'까지만 보여줘요."
+        )
+
+        def _render_sig_list(lst, head_emoji, head_text):
+            if not lst:
+                return
+            st.markdown(f"**{head_emoji} {head_text} ({len(lst)})**")
+            for s in lst:
+                with st.expander(f"{s['date']} · {s['name']}"):
+                    st.markdown(s["desc"])
+                    st.caption(f"⚠️ {s['caveat']}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            _render_sig_list(sigs["bullish"], "🟢", "강세 신호")
+        with c2:
+            _render_sig_list(sigs["bearish"], "🔴", "약세 신호")
+        if sigs["neutral"]:
+            _render_sig_list(sigs["neutral"], "⚪", "중립·전환 후보")
+
+        st.caption(
+            "🧠 패턴은 **거래량 동반**·**추세 위치**(과열/과매도)·**지지·저항선 부근**에 "
+            "겹쳐서 나올 때 신뢰도가 올라가요. 단독으로는 휩쏘(가짜 신호) 흔해요."
+        )
 
     # ── 참고 가격대 ───────────────────────────
     if levels is None:
