@@ -35,6 +35,7 @@ from llm_client import (summarize_news_ko, translate_headlines_ko,
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta, get_tag_info
 from signals import detect_all
+import glossary
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
 
@@ -787,6 +788,15 @@ def show_detail(symbol, df, context=None):
                 with st.expander(f"{s['date']} · {s['name']}"):
                     st.markdown(s["desc"])
                     st.caption(f"⚠️ {s['caveat']}")
+                    # 용어 사전 연결 — 신호 깊게 풀어보기 (popover로 expander 중첩 회피)
+                    gkey = s.get("glossary_key")
+                    if gkey:
+                        entry = glossary.get(gkey)
+                        if entry:
+                            with st.popover(f"📖 {entry['title']} 자세히 보기"):
+                                st.markdown(f"**{entry['summary']}**")
+                                st.markdown("---")
+                                st.markdown(entry["body"])
 
         c1, c2 = st.columns(2)
         with c1:
