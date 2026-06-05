@@ -169,6 +169,96 @@ def make_chart(df, lookback=60):
     return fig
 
 
+def overlay_signals_on_chart(fig, df, signals_result):
+    """
+    make_chart()가 만든 fig 의 가격 패널(row=1)에 시그널 마커를 얹는다.
+    signals_result: signals.detect_all() 결과 dict.
+    df: 차트에 들어간 df (일봉이면 분석용 원본). normalize된 날짜 인덱스 가정.
+    """
+    if not signals_result:
+        return fig
+
+    df = df.copy()
+    if getattr(df.index, "tz", None) is not None:
+        df.index = df.index.tz_localize(None)
+    df.index = df.index.normalize()
+    df_dates = set(df.index)
+
+    def _collect(lst, symbol_for, y_for):
+        xs, ys, hovers, syms = [], [], [], []
+        for s in lst:
+            try:
+                d = pd.to_datetime(s["date"]).normalize()
+            except Exception:
+                continue
+            if d not in df_dates:
+                continue
+            row = df.loc[d]
+            xs.append(d)
+            ys.append(y_for(row, s))
+            hovers.append(f"<b>{s['name']}</b><br>{s['date']}")
+            syms.append(symbol_for(s))
+        return xs, ys, hovers, syms
+
+    # 강세 — 캔들 아래 ▲, 크로스 ★, 돌파 ▲(외곽선)
+    def _bull_sym(s):
+        return {"candle": "triangle-up", "cross": "star",
+                "breakout": "triangle-up-open"}.get(s["kind"], "circle")
+
+    def _bull_y(row, s):
+        if s["kind"] == "cross":
+            return float(row["close"])
+        if s["kind"] == "breakout":
+            return float(row["high"]) * 1.025
+        return float(row["low"]) * 0.985
+
+    xs, ys, hovs, syms = _collect(signals_result.get("bullish", []), _bull_sym, _bull_y)
+    if xs:
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="markers", name="강세 신호",
+            marker=dict(size=13, color="#2f9e44", symbol=syms,
+                        line=dict(width=1, color="#155724")),
+            hovertext=hovs, hoverinfo="text",
+        ), row=1, col=1)
+
+    # 약세 — 캔들 위 ▼, 크로스 ✦(빈), 돌파 ▼(외곽선)
+    def _bear_sym(s):
+        return {"candle": "triangle-down", "cross": "star-open",
+                "breakout": "triangle-down-open"}.get(s["kind"], "circle")
+
+    def _bear_y(row, s):
+        if s["kind"] == "cross":
+            return float(row["close"])
+        if s["kind"] == "breakout":
+            return float(row["low"]) * 0.975
+        return float(row["high"]) * 1.015
+
+    xs, ys, hovs, syms = _collect(signals_result.get("bearish", []), _bear_sym, _bear_y)
+    if xs:
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="markers", name="약세 신호",
+            marker=dict(size=13, color="#e03131", symbol=syms,
+                        line=dict(width=1, color="#7a0d0d")),
+            hovertext=hovs, hoverinfo="text",
+        ), row=1, col=1)
+
+    # 중립 (도지) — 캔들 위 ◇
+    xs, ys, hovs, _ = _collect(
+        signals_result.get("neutral", []),
+        lambda s: "diamond-open",
+        lambda row, s: float(row["high"]) * 1.015,
+    )
+    if xs:
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="markers", name="중립",
+            marker=dict(size=10, color="#868e96", symbol="diamond-open",
+                        line=dict(width=1.2)),
+            hovertext=hovs, hoverinfo="text",
+        ), row=1, col=1)
+
+    return fig
+
+
 def reference_levels(df):
     """
     규칙 기반 진입/매도/손절 참고 가격대. **예측·추천이 아님 — 규칙으로 계산한 참고값**.
