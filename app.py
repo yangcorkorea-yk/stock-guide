@@ -874,24 +874,28 @@ def show_detail(symbol, df, context=None):
                     "매수·매도 시점 추천이 아닙니다. 아래 ⚠️ 한계를 꼭 읽어주세요."
                 )
 
-                def _render_align(side, color, head):
+                def _render_align(side, color, head, subline):
                     st.markdown(
                         f"**{color} {head} {side['score']}/{side['max']} 정렬**"
                     )
+                    st.caption(subline)
                     for c in side["checks"]:
                         emoji = "✅" if c["ok"] else "⚪"
                         st.markdown(f"- {emoji} **{c['label']}** — {c['detail']}")
 
+                bull_sub = "💡 관심 종목이라면 **진입 조건이 정렬됐는지** 점검할 때 참고."
+                bear_sub = "💡 보유 중이라면 **정리 조건이 정렬됐는지** 점검할 때 참고."
+
                 if show_bull and show_bear:
                     c1, c2 = st.columns(2)
                     with c1:
-                        _render_align(bull, "🟢", "강세 조건")
+                        _render_align(bull, "🟢", "강세 조건", bull_sub)
                     with c2:
-                        _render_align(bear, "🔴", "약세 조건")
+                        _render_align(bear, "🔴", "약세 조건", bear_sub)
                 elif show_bull:
-                    _render_align(bull, "🟢", "강세 조건")
+                    _render_align(bull, "🟢", "강세 조건", bull_sub)
                 else:
-                    _render_align(bear, "🔴", "약세 조건")
+                    _render_align(bear, "🔴", "약세 조건", bear_sub)
 
                 with st.expander("⚠️ 꼭 읽어주세요 — 이게 매수/매도 신호가 아닌 이유", expanded=False):
                     st.markdown(
