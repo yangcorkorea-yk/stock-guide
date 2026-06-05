@@ -35,7 +35,7 @@ from llm_client import (summarize_news_ko, translate_headlines_ko,
                         compare_kr_us_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta, get_tag_info
-from signals import detect_all, find_support_resistance
+from signals import detect_all, find_support_resistance, evaluate_alignment
 import glossary
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
@@ -845,6 +845,63 @@ def show_detail(symbol, df, context=None):
             "🧠 패턴은 **거래량 동반**·**추세 위치**(과열/과매도)·**지지·저항선 부근**에 "
             "겹쳐서 나올 때 신뢰도가 올라가요. 단독으로는 휩쏘(가짜 신호) 흔해요."
         )
+
+    # ── 🟡 조건 정렬 체크 (여러 신호가 동시에 같은 방향을 가리킬 때만) ──
+    if sigs is not None:
+        try:
+            alignment = evaluate_alignment(df, sigs, sr, info, recent_days=5)
+        except Exception:
+            alignment = None
+        if alignment:
+            bull = alignment["bull"]
+            bear = alignment["bear"]
+            show_bull = bull["score"] >= 3
+            show_bear = bear["score"] >= 3
+            if show_bull or show_bear:
+                st.subheader("🟡 조건 정렬 체크")
+                st.warning(
+                    "**'이런 조건들이 동시에 만족됐다'까지의 정보**입니다. "
+                    "매수·매도 시점 추천이 아닙니다. 아래 ⚠️ 한계를 꼭 읽어주세요."
+                )
+
+                def _render_align(side, color, head):
+                    st.markdown(
+                        f"**{color} {head} {side['score']}/{side['max']} 정렬**"
+                    )
+                    for c in side["checks"]:
+                        emoji = "✅" if c["ok"] else "⚪"
+                        st.markdown(f"- {emoji} **{c['label']}** — {c['detail']}")
+
+                if show_bull and show_bear:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        _render_align(bull, "🟢", "강세 조건")
+                    with c2:
+                        _render_align(bear, "🔴", "약세 조건")
+                elif show_bull:
+                    _render_align(bull, "🟢", "강세 조건")
+                else:
+                    _render_align(bear, "🔴", "약세 조건")
+
+                with st.expander("⚠️ 꼭 읽어주세요 — 이게 매수/매도 신호가 아닌 이유", expanded=False):
+                    st.markdown(
+                        "- 이 도구를 만든 사용자의 **백테스트에서 이런 신호 조합은 "
+                        "단순 보유(buy & hold)를 못 이긴 경우가 많아요**.\n"
+                        "- 조건이 정렬했다고 해서 다음 날 반드시 그 방향으로 가지 않아요 — "
+                        "**휩쏘(가짜 신호) 흔함**.\n"
+                        "- 이 체크엔 **시장 전체 분위기**(VIX·금리·뉴스·실적)가 반영되지 않아요. "
+                        "큰 시장 사건 하나면 무용지물.\n"
+                        "- 진입을 결정한다면 **손절선부터 정해두기** + **분할 진입** 고려.\n"
+                        "- 이건 '지금이 사야 할 때'가 아니라 **'지금 어떤 상태인가'를 한눈에** "
+                        "보여주는 도구예요.\n"
+                        "- **최종 판단·책임은 본인 몫**입니다."
+                    )
+                gentry = glossary.get("조건 정렬 체크")
+                if gentry:
+                    with st.popover(f"📖 {gentry['title']} 자세히 보기"):
+                        st.markdown(f"**{gentry['summary']}**")
+                        st.markdown("---")
+                        st.markdown(gentry["body"])
 
     # ── 참고 가격대 ───────────────────────────
     if levels is None:

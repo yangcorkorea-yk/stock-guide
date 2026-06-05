@@ -576,6 +576,93 @@ def find_support_resistance(df: pd.DataFrame, window: int = 5, lookback: int = 1
 
 
 # ──────────────────────────────────────────────
+# 조건 정렬 평가 (여러 신호가 동시에 정렬됐는지 — 노란불 수준)
+# ──────────────────────────────────────────────
+def evaluate_alignment(df: pd.DataFrame, sigs: dict, sr: dict, info: dict,
+                       recent_days: int = 5) -> dict:
+    """
+    여러 독립 조건이 동시에 같은 방향을 가리키는지 체크.
+    매수·매도 시점 추천이 아니라 '조건이 정렬됐다'까지의 정보.
+
+    각 방향(강세/약세)에 4개 조건:
+      1. 최근 캔들 패턴 (recent_days 안)
+      2. 돌파/리테스트 신호 (recent_days 안)
+      3. 지지·저항선 부근 (현재가 ±2% 안)
+      4. RSI 영역 (강세 ≤40 / 약세 ≥60)
+
+    반환:
+      {
+        "bull": {"score": int, "max": int, "checks": [{label, ok, detail}, ...]},
+        "bear": {"score": int, "max": int, "checks": [...]},
+      }
+    """
+    today = df.index[-1]
+    cutoff = today - pd.Timedelta(days=recent_days)
+    cur = info["close"]
+    rsi = info["rsi"]
+
+    def _recent(direction: str, kinds: list[str]):
+        for s in sigs.get(direction, []):
+            if s.get("kind") not in kinds:
+                continue
+            try:
+                d = pd.to_datetime(s["date"])
+                if d.tz is not None:
+                    d = d.tz_localize(None)
+                if d >= cutoff:
+                    return s
+            except Exception:
+                pass
+        return None
+
+    def _near(levels: list[dict], pct: float = 0.02):
+        if not levels:
+            return None, "감지된 라인 없음"
+        nearest = min(levels, key=lambda x: abs(x["price"] - cur))
+        dist_pct = abs(nearest["price"] - cur) / cur
+        if dist_pct <= pct:
+            return nearest, (f"${nearest['price']:.2f} "
+                             f"({dist_pct*100:.1f}% 차이, {nearest['touches']}회 터치)")
+        return None, (f"가장 가까운 라인 ${nearest['price']:.2f} "
+                      f"({dist_pct*100:.1f}% 거리 — 2% 밖)")
+
+    # 강세 조건
+    bull_candle = _recent("bullish", ["candle"])
+    bull_brk = _recent("bullish", ["breakout", "retest"])
+    near_sup, sup_detail = _near((sr or {}).get("support", []))
+    bull_checks = [
+        {"label": "강세 캔들 패턴", "ok": bool(bull_candle),
+         "detail": f"{bull_candle['date']} {bull_candle['name']}" if bull_candle else f"최근 {recent_days}일 없음"},
+        {"label": "거래량 동반 돌파·리테스트 성공", "ok": bool(bull_brk),
+         "detail": f"{bull_brk['date']} {bull_brk['name']}" if bull_brk else "최근 없음"},
+        {"label": "지지선 부근 (±2%)", "ok": bool(near_sup), "detail": sup_detail},
+        {"label": "RSI 과매도/회복 구간 (≤40)", "ok": rsi <= 40,
+         "detail": f"RSI {rsi:.0f}"},
+    ]
+    bull_score = sum(1 for c in bull_checks if c["ok"])
+
+    # 약세 조건 (대칭)
+    bear_candle = _recent("bearish", ["candle"])
+    bear_brk = _recent("bearish", ["breakout"])
+    near_res, res_detail = _near((sr or {}).get("resistance", []))
+    bear_checks = [
+        {"label": "약세 캔들 패턴", "ok": bool(bear_candle),
+         "detail": f"{bear_candle['date']} {bear_candle['name']}" if bear_candle else f"최근 {recent_days}일 없음"},
+        {"label": "거래량 동반 신저가 이탈", "ok": bool(bear_brk),
+         "detail": f"{bear_brk['date']} {bear_brk['name']}" if bear_brk else "최근 없음"},
+        {"label": "저항선 부근 (±2%)", "ok": bool(near_res), "detail": res_detail},
+        {"label": "RSI 과열/하락 구간 (≥60)", "ok": rsi >= 60,
+         "detail": f"RSI {rsi:.0f}"},
+    ]
+    bear_score = sum(1 for c in bear_checks if c["ok"])
+
+    return {
+        "bull": {"score": bull_score, "max": len(bull_checks), "checks": bull_checks},
+        "bear": {"score": bear_score, "max": len(bear_checks), "checks": bear_checks},
+    }
+
+
+# ──────────────────────────────────────────────
 # 차트 패턴 (더블바텀·더블탑·헤드앤숄더) — '후보' 수준 휴리스틱
 # ──────────────────────────────────────────────
 def _is_close(a: float, b: float, tol_pct: float = 0.02) -> bool:
