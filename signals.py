@@ -339,6 +339,350 @@ def detect_breakouts(df: pd.DataFrame, lookback: int = 5) -> list[dict]:
 
 
 # ──────────────────────────────────────────────
+# 돌파 후 되돌림(리테스트) 감지
+# ──────────────────────────────────────────────
+def detect_retests(df: pd.DataFrame, lookback: int = 20, tol_pct: float = 0.01) -> list[dict]:
+    """
+    최근 lookback 일 안의 돌파를 찾아서, 그 이후 흐름이 리테스트 패턴인지 평가.
+
+    상태 분류:
+      · 진짜(성공): 돌파 → tol_pct 이내까지 눌렸다가 → 다시 돌파선 위로 회복
+      · 가짜(실패): 돌파 → 박스 안으로 다시 회귀해 머무름(돌파선 -tol_pct*2 아래로 종가)
+      · 진행 중:    돌파 → 아직 리테스트 또는 회복 미완
+
+    돌파 기준: 종가 > 직전 20일 고점 + 거래량 ≥ 평균×1.5
+    """
+    if len(df) < 25:
+        return []
+    results = []
+    vol_ma20 = df["volume"].rolling(20).mean()
+    last_i = len(df) - 1
+    start = max(20, len(df) - lookback)
+    for i in range(start, len(df) - 1):  # 마지막 봉 자체는 후속 흐름 평가 불가
+        row = df.iloc[i]
+        close_t = float(row["close"])
+        vol_t = float(row["volume"])
+        vma = float(vol_ma20.iloc[i]) if not pd.isna(vol_ma20.iloc[i]) else 0
+        if vma == 0:
+            continue
+        prev_high = float(df["high"].iloc[i - 20:i].max())
+        if not (close_t > prev_high and vol_t >= vma * 1.5):
+            continue  # 돌파 아님
+
+        break_level = prev_high
+        d_break = str(df.index[i].date())
+
+        # 돌파 이후 흐름 (최대 10일 또는 데이터 끝까지)
+        after = df.iloc[i + 1:min(i + 11, last_i + 1)]
+        if len(after) == 0:
+            continue
+
+        touched_back = False
+        recovered = False
+        fell_through = False
+        touch_idx = None
+        for j in range(len(after)):
+            row_a = after.iloc[j]
+            low_a = float(row_a["low"])
+            close_a = float(row_a["close"])
+            # 박스 깊이 회귀 (가짜 신호)
+            if close_a < break_level * (1 - tol_pct * 2):
+                fell_through = True
+                break
+            # 돌파선 부근 터치
+            if not touched_back and low_a <= break_level * (1 + tol_pct):
+                touched_back = True
+                touch_idx = j
+            # 터치 후 다시 위로 회복
+            if touched_back and close_a > break_level * (1 + tol_pct):
+                recovered = True
+                break
+
+        last_date = str(after.index[-1].date())
+        if fell_through:
+            results.append({
+                "name": "리테스트 실패 — 박스 회귀 (가짜 돌파)",
+                "kind": "retest",
+                "direction": "약세",
+                "date": last_date,
+                "desc": f"{d_break} 돌파 후 돌파선(\\${break_level:.2f}) 아래로 다시 깊게 내려가 머무름. 휩쏘 가능성.",
+                "caveat": "패닉성 일시 하락일 수도 있음. 거래량과 다음 봉 확인.",
+                "glossary_key": "돌파 후 리테스트",
+            })
+        elif recovered:
+            results.append({
+                "name": "리테스트 성공 — 진짜 돌파",
+                "kind": "retest",
+                "direction": "강세",
+                "date": last_date,
+                "desc": f"{d_break} 돌파 후 돌파선(\\${break_level:.2f})까지 눌렸다 다시 위로 회복. 옛 저항이 지지로 역할 전환.",
+                "caveat": "추세가 약하거나 시장 전체가 약하면 다시 무너지기도 함.",
+                "glossary_key": "돌파 후 리테스트",
+            })
+        elif touched_back:
+            # 터치는 했는데 아직 회복 못 함
+            results.append({
+                "name": "리테스트 진행 중",
+                "kind": "retest",
+                "direction": "중립",
+                "date": last_date,
+                "desc": f"{d_break} 돌파 후 돌파선(\\${break_level:.2f}) 부근까지 눌림. 아직 회복 여부 미정.",
+                "caveat": "다음 1~3봉에서 회복하면 진짜 / 더 내려가면 가짜로 판가름.",
+                "glossary_key": "돌파 후 리테스트",
+            })
+    return results
+
+
+# ──────────────────────────────────────────────
+# 거래량 다이버전스 (가격↑ but 거래량 못 따라옴)
+# ──────────────────────────────────────────────
+def detect_divergence(df: pd.DataFrame, lookback: int = 5) -> list[dict]:
+    """
+    가장 단순한 형태:
+      · 종가가 직전 20일 최고치를 새로 갱신 + 그날 거래량 < 20일 평균 → 약세 다이버전스
+      · 종가가 직전 20일 최저치를 새로 깨는데 + 거래량 < 20일 평균 → 강세 다이버전스
+        (매도세조차 식어가는 신호 — '바닥권' 후보)
+    """
+    if len(df) < 25:
+        return []
+    results = []
+    vol_ma20 = df["volume"].rolling(20).mean()
+    start = max(20, len(df) - lookback)
+    for i in range(start, len(df)):
+        row = df.iloc[i]
+        close = float(row["close"])
+        vol = float(row["volume"])
+        vma = float(vol_ma20.iloc[i]) if not pd.isna(vol_ma20.iloc[i]) else 0
+        if vma == 0:
+            continue
+        prev_high = float(df["high"].iloc[i - 20:i].max())
+        prev_low = float(df["low"].iloc[i - 20:i].min())
+        d = str(df.index[i].date())
+
+        # 약세 다이버전스: 신고가인데 거래량 못 따라옴
+        if close > prev_high and vol < vma:
+            results.append({
+                "name": "거래량 다이버전스 (가격↑ 거래량↓)",
+                "kind": "divergence",
+                "direction": "약세",
+                "date": d,
+                "desc": "20일 신고가를 갱신했는데 거래량이 평소보다 적음. 상승 동력이 약해지는 신호.",
+                "caveat": "단발성 휴장·반차익 매도일 수도 있음. 며칠 더 이어지면 신뢰도 ↑.",
+                "glossary_key": "거래량 다이버전스",
+            })
+
+        # 강세 다이버전스: 신저가인데 매도조차 식음
+        if close < prev_low and vol < vma:
+            results.append({
+                "name": "거래량 다이버전스 (가격↓ 거래량↓)",
+                "kind": "divergence",
+                "direction": "강세",
+                "date": d,
+                "desc": "20일 신저가를 깼는데 거래량도 평소보다 적음. 매도세가 식어가는 바닥권 후보.",
+                "caveat": "추가 하락 후 반등으로 이어지는 경우도, 그대로 추세 이탈하는 경우도 있음.",
+                "glossary_key": "거래량 다이버전스",
+            })
+
+    return results
+
+
+# ──────────────────────────────────────────────
+# 수평 지지·저항선 자동 감지
+# ──────────────────────────────────────────────
+def _local_peaks(series: pd.Series, window: int = 5) -> list[int]:
+    """좌우 window 안에서 최대인 점들의 인덱스."""
+    peaks = []
+    for i in range(window, len(series) - window):
+        left = series.iloc[i - window:i]
+        right = series.iloc[i + 1:i + window + 1]
+        v = series.iloc[i]
+        if v >= left.max() and v >= right.max() and v > left.min():
+            peaks.append(i)
+    return peaks
+
+
+def _local_troughs(series: pd.Series, window: int = 5) -> list[int]:
+    """좌우 window 안에서 최소인 점들의 인덱스."""
+    troughs = []
+    for i in range(window, len(series) - window):
+        left = series.iloc[i - window:i]
+        right = series.iloc[i + 1:i + window + 1]
+        v = series.iloc[i]
+        if v <= left.min() and v <= right.min() and v < left.max():
+            troughs.append(i)
+    return troughs
+
+
+def _cluster_levels(values: list[float], tol_pct: float = 0.015) -> list[dict]:
+    """
+    가격이 tol_pct(예: 1.5%) 이내인 값끼리 묶어서 평균 가격과 터치 횟수를 반환.
+    반환: [{price, touches, members}], 터치 횟수 내림차순.
+    """
+    if not values:
+        return []
+    sorted_v = sorted(values)
+    clusters = []
+    cur = [sorted_v[0]]
+    for v in sorted_v[1:]:
+        if abs(v - cur[-1]) / cur[-1] <= tol_pct:
+            cur.append(v)
+        else:
+            clusters.append(cur)
+            cur = [v]
+    clusters.append(cur)
+    out = [{"price": sum(c) / len(c), "touches": len(c), "members": c} for c in clusters]
+    out.sort(key=lambda x: (-x["touches"], -x["price"]))
+    return out
+
+
+def find_support_resistance(df: pd.DataFrame, window: int = 5, lookback: int = 120,
+                            tol_pct: float = 0.015, min_touches: int = 2,
+                            max_levels: int = 3) -> dict:
+    """
+    최근 lookback 일 안에서 지지선(저점 클러스터)과 저항선(고점 클러스터)을 찾는다.
+    - min_touches 이상 반응한 자리만 유지
+    - 현재가 기준 위쪽 = 저항, 아래쪽 = 지지로 분류
+    - 각 max_levels 개까지
+
+    반환:
+      {
+        "support":    [{price, touches}, ...],   # 현재가 아래
+        "resistance": [{price, touches}, ...],   # 현재가 위
+      }
+    """
+    if len(df) < window * 4:
+        return {"support": [], "resistance": []}
+    tail = df.tail(lookback)
+    highs = tail["high"]
+    lows = tail["low"]
+    cur = float(df["close"].iloc[-1])
+
+    peak_idx = _local_peaks(highs, window=window)
+    trough_idx = _local_troughs(lows, window=window)
+    peak_prices = [float(highs.iloc[i]) for i in peak_idx]
+    trough_prices = [float(lows.iloc[i]) for i in trough_idx]
+
+    # 클러스터링 (저점·고점 합쳐서 — 역할 전환 고려)
+    all_levels = _cluster_levels(peak_prices + trough_prices, tol_pct=tol_pct)
+    valid = [c for c in all_levels if c["touches"] >= min_touches]
+
+    support = [c for c in valid if c["price"] < cur * 0.998]
+    resistance = [c for c in valid if c["price"] > cur * 1.002]
+
+    return {
+        "support": support[:max_levels],
+        "resistance": resistance[:max_levels],
+    }
+
+
+# ──────────────────────────────────────────────
+# 차트 패턴 (더블바텀·더블탑·헤드앤숄더) — '후보' 수준 휴리스틱
+# ──────────────────────────────────────────────
+def _is_close(a: float, b: float, tol_pct: float = 0.02) -> bool:
+    """두 값이 tol_pct 이내인가."""
+    if max(abs(a), abs(b)) == 0:
+        return False
+    return abs(a - b) / max(abs(a), abs(b)) <= tol_pct
+
+
+def detect_chart_patterns(df: pd.DataFrame, lookback: int = 90, window: int = 5,
+                          tol_pct: float = 0.03) -> list[dict]:
+    """
+    최근 lookback 일 안에서 단순 차트 패턴 후보를 찾는다.
+    엄격한 정의 대신 '관용적 룰' 사용 — 오탐 가능하므로 결과는 모두 '후보'로 표시.
+
+    감지 패턴:
+      · 더블바텀(W): 비슷한 높이 트로프 2개 + 사이에 피크 → 강세 후보
+      · 더블탑(M):   비슷한 높이 피크 2개 + 사이에 트로프 → 약세 후보
+      · 헤드앤숄더:  피크3 (가운데가 가장 높음) → 약세 후보
+      · 역 헤드앤숄더: 트로프3 (가운데가 가장 낮음) → 강세 후보
+
+    조건:
+      · 패턴의 마지막 점이 lookback 안에 있어야 함
+      · 양쪽 어깨/바닥은 tol_pct(3%) 이내 유사
+      · 가운데 점은 양쪽보다 1.5% 이상 두드러져야 함
+    """
+    if len(df) < 30:
+        return []
+    tail = df.tail(lookback)
+    highs = tail["high"].reset_index(drop=True)
+    lows = tail["low"].reset_index(drop=True)
+    dates = tail.index
+
+    peak_idx = _local_peaks(highs, window=window)
+    trough_idx = _local_troughs(lows, window=window)
+
+    results = []
+
+    # 더블탑 (M): 마지막 두 피크가 비슷한 높이
+    if len(peak_idx) >= 2:
+        p1, p2 = peak_idx[-2], peak_idx[-1]
+        v1, v2 = highs.iloc[p1], highs.iloc[p2]
+        # 사이에 트로프 존재
+        between_troughs = [t for t in trough_idx if p1 < t < p2]
+        if _is_close(v1, v2, tol_pct) and between_troughs:
+            results.append({
+                "name": "더블탑 (M) 후보",
+                "kind": "pattern",
+                "direction": "약세",
+                "date": str(dates[p2].date()),
+                "desc": f"비슷한 높이 두 봉우리 (\\${v1:.2f}, \\${v2:.2f}) 사이에 골 — 천장권 패턴 후보.",
+                "caveat": "두 번째 봉우리 후 사이 골을 아래로 깰 때 '확정'으로 거론됨. 오탐 잦은 패턴이라 단독으론 약함.",
+                "glossary_key": "차트 패턴 (더블탑·더블바텀)",
+            })
+
+    # 더블바텀 (W): 마지막 두 트로프가 비슷한 깊이
+    if len(trough_idx) >= 2:
+        t1, t2 = trough_idx[-2], trough_idx[-1]
+        v1, v2 = lows.iloc[t1], lows.iloc[t2]
+        between_peaks = [p for p in peak_idx if t1 < p < t2]
+        if _is_close(v1, v2, tol_pct) and between_peaks:
+            results.append({
+                "name": "더블바텀 (W) 후보",
+                "kind": "pattern",
+                "direction": "강세",
+                "date": str(dates[t2].date()),
+                "desc": f"비슷한 깊이 두 바닥 (\\${v1:.2f}, \\${v2:.2f}) 사이에 봉우리 — 바닥권 패턴 후보.",
+                "caveat": "두 번째 바닥 후 사이 봉우리를 위로 뚫을 때 '확정'으로 거론됨. 오탐 잦음.",
+                "glossary_key": "차트 패턴 (더블탑·더블바텀)",
+            })
+
+    # 헤드앤숄더 (피크 3개, 가운데 가장 높음)
+    if len(peak_idx) >= 3:
+        ls, head, rs = peak_idx[-3], peak_idx[-2], peak_idx[-1]
+        ls_v, head_v, rs_v = highs.iloc[ls], highs.iloc[head], highs.iloc[rs]
+        if (head_v > ls_v * 1.015 and head_v > rs_v * 1.015
+                and _is_close(ls_v, rs_v, tol_pct)):
+            results.append({
+                "name": "헤드앤숄더 후보",
+                "kind": "pattern",
+                "direction": "약세",
+                "date": str(dates[rs].date()),
+                "desc": f"세 봉우리 — 가운데(\\${head_v:.2f})가 양 어깨(\\${ls_v:.2f}, \\${rs_v:.2f})보다 도드라짐. 천장권 패턴 후보.",
+                "caveat": "양 어깨 잇는 '넥라인'을 아래로 깰 때 확정으로 거론됨. 시각적 패턴이라 사람마다 다르게 봄.",
+                "glossary_key": "차트 패턴 (헤드앤숄더)",
+            })
+
+    # 역 헤드앤숄더 (트로프 3개, 가운데 가장 낮음)
+    if len(trough_idx) >= 3:
+        ls, head, rs = trough_idx[-3], trough_idx[-2], trough_idx[-1]
+        ls_v, head_v, rs_v = lows.iloc[ls], lows.iloc[head], lows.iloc[rs]
+        if (head_v < ls_v * 0.985 and head_v < rs_v * 0.985
+                and _is_close(ls_v, rs_v, tol_pct)):
+            results.append({
+                "name": "역 헤드앤숄더 후보",
+                "kind": "pattern",
+                "direction": "강세",
+                "date": str(dates[rs].date()),
+                "desc": f"세 바닥 — 가운데(\\${head_v:.2f})가 양 어깨(\\${ls_v:.2f}, \\${rs_v:.2f})보다 도드라짐. 바닥권 패턴 후보.",
+                "caveat": "넥라인을 위로 뚫을 때 확정으로 거론됨. 시각적 패턴이라 주관적.",
+                "glossary_key": "차트 패턴 (헤드앤숄더)",
+            })
+
+    return results
+
+
+# ──────────────────────────────────────────────
 # 종합: 모든 신호 한 번에 + 정리
 # ──────────────────────────────────────────────
 def detect_all(df: pd.DataFrame, lookback: int = 10) -> dict:
@@ -356,6 +700,9 @@ def detect_all(df: pd.DataFrame, lookback: int = 10) -> dict:
         detect_candles(df, lookback=lookback)
         + detect_ma_crosses(df, lookback=lookback)
         + detect_breakouts(df, lookback=min(lookback, 5))
+        + detect_divergence(df, lookback=min(lookback, 5))
+        + detect_retests(df, lookback=min(lookback * 2, 20))
+        + detect_chart_patterns(df, lookback=90)
     )
     bullish, bearish, neutral = [], [], []
     for s in all_sigs:

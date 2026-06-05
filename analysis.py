@@ -200,16 +200,25 @@ def overlay_signals_on_chart(fig, df, signals_result):
             syms.append(symbol_for(s))
         return xs, ys, hovers, syms
 
-    # 강세 — 캔들 아래 ▲, 크로스 ★, 돌파 ▲(외곽선)
+    # 강세 — 캔들 아래 ▲, 크로스 ★, 돌파 ▲(외곽선), 다이버전스 ◻
     def _bull_sym(s):
         return {"candle": "triangle-up", "cross": "star",
-                "breakout": "triangle-up-open"}.get(s["kind"], "circle")
+                "breakout": "triangle-up-open",
+                "divergence": "square-open",
+                "retest": "hexagon",
+                "pattern": "bowtie"}.get(s["kind"], "circle")
 
     def _bull_y(row, s):
         if s["kind"] == "cross":
             return float(row["close"])
         if s["kind"] == "breakout":
             return float(row["high"]) * 1.025
+        if s["kind"] == "divergence":
+            return float(row["low"]) * 0.97
+        if s["kind"] == "retest":
+            return float(row["low"]) * 0.96
+        if s["kind"] == "pattern":
+            return float(row["low"]) * 0.95
         return float(row["low"]) * 0.985
 
     xs, ys, hovs, syms = _collect(signals_result.get("bullish", []), _bull_sym, _bull_y)
@@ -221,16 +230,25 @@ def overlay_signals_on_chart(fig, df, signals_result):
             hovertext=hovs, hoverinfo="text",
         ), row=1, col=1)
 
-    # 약세 — 캔들 위 ▼, 크로스 ✦(빈), 돌파 ▼(외곽선)
+    # 약세 — 캔들 위 ▼, 크로스 ✦(빈), 돌파 ▼(외곽선), 다이버전스 ◻
     def _bear_sym(s):
         return {"candle": "triangle-down", "cross": "star-open",
-                "breakout": "triangle-down-open"}.get(s["kind"], "circle")
+                "breakout": "triangle-down-open",
+                "divergence": "square-open",
+                "retest": "hexagon",
+                "pattern": "bowtie"}.get(s["kind"], "circle")
 
     def _bear_y(row, s):
         if s["kind"] == "cross":
             return float(row["close"])
         if s["kind"] == "breakout":
             return float(row["low"]) * 0.975
+        if s["kind"] == "divergence":
+            return float(row["high"]) * 1.03
+        if s["kind"] == "retest":
+            return float(row["high"]) * 1.04
+        if s["kind"] == "pattern":
+            return float(row["high"]) * 1.05
         return float(row["high"]) * 1.015
 
     xs, ys, hovs, syms = _collect(signals_result.get("bearish", []), _bear_sym, _bear_y)
@@ -256,6 +274,31 @@ def overlay_signals_on_chart(fig, df, signals_result):
             hovertext=hovs, hoverinfo="text",
         ), row=1, col=1)
 
+    return fig
+
+
+def overlay_support_resistance(fig, sr: dict):
+    """make_chart() 가격 패널에 지지·저항선을 점선으로 추가."""
+    if not sr:
+        return fig
+    for lvl in sr.get("support", []):
+        fig.add_hline(
+            y=lvl["price"],
+            line=dict(color="#1c7ed6", dash="dash", width=1),
+            row=1, col=1,
+            annotation_text=f"지지 ${lvl['price']:.2f} ({lvl['touches']}회)",
+            annotation_position="right",
+            annotation_font=dict(size=10, color="#1c7ed6"),
+        )
+    for lvl in sr.get("resistance", []):
+        fig.add_hline(
+            y=lvl["price"],
+            line=dict(color="#e03131", dash="dash", width=1),
+            row=1, col=1,
+            annotation_text=f"저항 ${lvl['price']:.2f} ({lvl['touches']}회)",
+            annotation_position="right",
+            annotation_font=dict(size=10, color="#e03131"),
+        )
     return fig
 
 
