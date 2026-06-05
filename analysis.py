@@ -205,7 +205,8 @@ def overlay_signals_on_chart(fig, df, signals_result):
         return {"candle": "triangle-up", "cross": "star",
                 "breakout": "triangle-up-open",
                 "divergence": "square-open",
-                "retest": "hexagon"}.get(s["kind"], "circle")
+                "retest": "hexagon",
+                "pattern": "bowtie"}.get(s["kind"], "circle")
 
     def _bull_y(row, s):
         if s["kind"] == "cross":
@@ -216,6 +217,8 @@ def overlay_signals_on_chart(fig, df, signals_result):
             return float(row["low"]) * 0.97
         if s["kind"] == "retest":
             return float(row["low"]) * 0.96
+        if s["kind"] == "pattern":
+            return float(row["low"]) * 0.95
         return float(row["low"]) * 0.985
 
     xs, ys, hovs, syms = _collect(signals_result.get("bullish", []), _bull_sym, _bull_y)
@@ -232,7 +235,8 @@ def overlay_signals_on_chart(fig, df, signals_result):
         return {"candle": "triangle-down", "cross": "star-open",
                 "breakout": "triangle-down-open",
                 "divergence": "square-open",
-                "retest": "hexagon"}.get(s["kind"], "circle")
+                "retest": "hexagon",
+                "pattern": "bowtie"}.get(s["kind"], "circle")
 
     def _bear_y(row, s):
         if s["kind"] == "cross":
@@ -243,6 +247,8 @@ def overlay_signals_on_chart(fig, df, signals_result):
             return float(row["high"]) * 1.03
         if s["kind"] == "retest":
             return float(row["high"]) * 1.04
+        if s["kind"] == "pattern":
+            return float(row["high"]) * 1.05
         return float(row["high"]) * 1.015
 
     xs, ys, hovs, syms = _collect(signals_result.get("bearish", []), _bear_sym, _bear_y)

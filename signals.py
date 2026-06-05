@@ -576,6 +576,113 @@ def find_support_resistance(df: pd.DataFrame, window: int = 5, lookback: int = 1
 
 
 # ──────────────────────────────────────────────
+# 차트 패턴 (더블바텀·더블탑·헤드앤숄더) — '후보' 수준 휴리스틱
+# ──────────────────────────────────────────────
+def _is_close(a: float, b: float, tol_pct: float = 0.02) -> bool:
+    """두 값이 tol_pct 이내인가."""
+    if max(abs(a), abs(b)) == 0:
+        return False
+    return abs(a - b) / max(abs(a), abs(b)) <= tol_pct
+
+
+def detect_chart_patterns(df: pd.DataFrame, lookback: int = 90, window: int = 5,
+                          tol_pct: float = 0.03) -> list[dict]:
+    """
+    최근 lookback 일 안에서 단순 차트 패턴 후보를 찾는다.
+    엄격한 정의 대신 '관용적 룰' 사용 — 오탐 가능하므로 결과는 모두 '후보'로 표시.
+
+    감지 패턴:
+      · 더블바텀(W): 비슷한 높이 트로프 2개 + 사이에 피크 → 강세 후보
+      · 더블탑(M):   비슷한 높이 피크 2개 + 사이에 트로프 → 약세 후보
+      · 헤드앤숄더:  피크3 (가운데가 가장 높음) → 약세 후보
+      · 역 헤드앤숄더: 트로프3 (가운데가 가장 낮음) → 강세 후보
+
+    조건:
+      · 패턴의 마지막 점이 lookback 안에 있어야 함
+      · 양쪽 어깨/바닥은 tol_pct(3%) 이내 유사
+      · 가운데 점은 양쪽보다 1.5% 이상 두드러져야 함
+    """
+    if len(df) < 30:
+        return []
+    tail = df.tail(lookback)
+    highs = tail["high"].reset_index(drop=True)
+    lows = tail["low"].reset_index(drop=True)
+    dates = tail.index
+
+    peak_idx = _local_peaks(highs, window=window)
+    trough_idx = _local_troughs(lows, window=window)
+
+    results = []
+
+    # 더블탑 (M): 마지막 두 피크가 비슷한 높이
+    if len(peak_idx) >= 2:
+        p1, p2 = peak_idx[-2], peak_idx[-1]
+        v1, v2 = highs.iloc[p1], highs.iloc[p2]
+        # 사이에 트로프 존재
+        between_troughs = [t for t in trough_idx if p1 < t < p2]
+        if _is_close(v1, v2, tol_pct) and between_troughs:
+            results.append({
+                "name": "더블탑 (M) 후보",
+                "kind": "pattern",
+                "direction": "약세",
+                "date": str(dates[p2].date()),
+                "desc": f"비슷한 높이 두 봉우리 (\\${v1:.2f}, \\${v2:.2f}) 사이에 골 — 천장권 패턴 후보.",
+                "caveat": "두 번째 봉우리 후 사이 골을 아래로 깰 때 '확정'으로 거론됨. 오탐 잦은 패턴이라 단독으론 약함.",
+                "glossary_key": "차트 패턴 (더블탑·더블바텀)",
+            })
+
+    # 더블바텀 (W): 마지막 두 트로프가 비슷한 깊이
+    if len(trough_idx) >= 2:
+        t1, t2 = trough_idx[-2], trough_idx[-1]
+        v1, v2 = lows.iloc[t1], lows.iloc[t2]
+        between_peaks = [p for p in peak_idx if t1 < p < t2]
+        if _is_close(v1, v2, tol_pct) and between_peaks:
+            results.append({
+                "name": "더블바텀 (W) 후보",
+                "kind": "pattern",
+                "direction": "강세",
+                "date": str(dates[t2].date()),
+                "desc": f"비슷한 깊이 두 바닥 (\\${v1:.2f}, \\${v2:.2f}) 사이에 봉우리 — 바닥권 패턴 후보.",
+                "caveat": "두 번째 바닥 후 사이 봉우리를 위로 뚫을 때 '확정'으로 거론됨. 오탐 잦음.",
+                "glossary_key": "차트 패턴 (더블탑·더블바텀)",
+            })
+
+    # 헤드앤숄더 (피크 3개, 가운데 가장 높음)
+    if len(peak_idx) >= 3:
+        ls, head, rs = peak_idx[-3], peak_idx[-2], peak_idx[-1]
+        ls_v, head_v, rs_v = highs.iloc[ls], highs.iloc[head], highs.iloc[rs]
+        if (head_v > ls_v * 1.015 and head_v > rs_v * 1.015
+                and _is_close(ls_v, rs_v, tol_pct)):
+            results.append({
+                "name": "헤드앤숄더 후보",
+                "kind": "pattern",
+                "direction": "약세",
+                "date": str(dates[rs].date()),
+                "desc": f"세 봉우리 — 가운데(\\${head_v:.2f})가 양 어깨(\\${ls_v:.2f}, \\${rs_v:.2f})보다 도드라짐. 천장권 패턴 후보.",
+                "caveat": "양 어깨 잇는 '넥라인'을 아래로 깰 때 확정으로 거론됨. 시각적 패턴이라 사람마다 다르게 봄.",
+                "glossary_key": "차트 패턴 (헤드앤숄더)",
+            })
+
+    # 역 헤드앤숄더 (트로프 3개, 가운데 가장 낮음)
+    if len(trough_idx) >= 3:
+        ls, head, rs = trough_idx[-3], trough_idx[-2], trough_idx[-1]
+        ls_v, head_v, rs_v = lows.iloc[ls], lows.iloc[head], lows.iloc[rs]
+        if (head_v < ls_v * 0.985 and head_v < rs_v * 0.985
+                and _is_close(ls_v, rs_v, tol_pct)):
+            results.append({
+                "name": "역 헤드앤숄더 후보",
+                "kind": "pattern",
+                "direction": "강세",
+                "date": str(dates[rs].date()),
+                "desc": f"세 바닥 — 가운데(\\${head_v:.2f})가 양 어깨(\\${ls_v:.2f}, \\${rs_v:.2f})보다 도드라짐. 바닥권 패턴 후보.",
+                "caveat": "넥라인을 위로 뚫을 때 확정으로 거론됨. 시각적 패턴이라 주관적.",
+                "glossary_key": "차트 패턴 (헤드앤숄더)",
+            })
+
+    return results
+
+
+# ──────────────────────────────────────────────
 # 종합: 모든 신호 한 번에 + 정리
 # ──────────────────────────────────────────────
 def detect_all(df: pd.DataFrame, lookback: int = 10) -> dict:
@@ -595,6 +702,7 @@ def detect_all(df: pd.DataFrame, lookback: int = 10) -> dict:
         + detect_breakouts(df, lookback=min(lookback, 5))
         + detect_divergence(df, lookback=min(lookback, 5))
         + detect_retests(df, lookback=min(lookback * 2, 20))
+        + detect_chart_patterns(df, lookback=90)
     )
     bullish, bearish, neutral = [], [], []
     for s in all_sigs:
