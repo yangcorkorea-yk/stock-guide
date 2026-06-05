@@ -23,7 +23,8 @@ _TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
 
 def _looks_like_ticker(s: str) -> bool:
     return bool(s and _TICKER_RE.match(s.upper()))
-from analysis import (get_bars, analyze, explain, make_chart, overlay_signals_on_chart, resample_bars,
+from analysis import (get_bars, analyze, explain, make_chart, overlay_signals_on_chart,
+                      overlay_support_resistance, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context, upcoming_earnings_for_symbols,
@@ -34,7 +35,7 @@ from llm_client import (summarize_news_ko, translate_headlines_ko,
                         compare_kr_us_ko)
 from ticker_names import search_tickers, display_name, TICKER_NAMES
 from macro_calendar import upcoming_events, get_meta as get_macro_meta, get_tag_info
-from signals import detect_all
+from signals import detect_all, find_support_resistance
 import glossary
 
 st.set_page_config(page_title="종목 길잡이", page_icon="📈", layout="centered")
@@ -572,13 +573,18 @@ def show_detail(symbol, df, context=None):
         long_df = cached_bars_long(symbol)
         chart_df = resample_bars(long_df, "W" if tf == "주봉" else "M")
 
-    # 일봉일 때만 시그널 미리 계산 → 차트 오버레이 + 아래 섹션에서 재사용
+    # 일봉일 때만 시그널·지지저항 미리 계산 → 차트 오버레이 + 아래 섹션에서 재사용
     sigs = None
+    sr = None
     if tf == "일봉":
         try:
             sigs = detect_all(df, lookback=10)
         except Exception:
             sigs = None
+        try:
+            sr = find_support_resistance(df, lookback=120, min_touches=2, max_levels=3)
+        except Exception:
+            sr = None
 
     # 일봉일 때만 참고 가격대(진입/매도/손절) 수평선 표시
     fig = make_chart(chart_df)
@@ -594,6 +600,11 @@ def show_detail(symbol, df, context=None):
                           row=1, col=1, annotation_text="손절 참고", annotation_position="left")
         except Exception:
             levels = None
+        if sr and (sr.get("support") or sr.get("resistance")):
+            try:
+                fig = overlay_support_resistance(fig, sr)
+            except Exception:
+                pass
         if sigs:
             try:
                 fig = overlay_signals_on_chart(fig, chart_df, sigs)
@@ -602,8 +613,15 @@ def show_detail(symbol, df, context=None):
     st.plotly_chart(fig, width="stretch", key=f"chart_{symbol}_{tf}",
                     config=PLOTLY_CONFIG)
     cap = f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)"
+    extras = []
     if tf == "일봉" and sigs and (sigs["bullish"] or sigs["bearish"] or sigs["neutral"]):
-        cap += " · 차트 위 ▲▼★◇는 포착된 신호 (자세한 설명은 아래 🚦 섹션)"
+        extras.append("차트 위 ▲▼★◇◻는 포착된 신호")
+    if tf == "일봉" and sr and (sr.get("support") or sr.get("resistance")):
+        n_s = len(sr.get("support", []))
+        n_r = len(sr.get("resistance", []))
+        extras.append(f"점선은 자동 감지된 지지({n_s})·저항({n_r})")
+    if extras:
+        cap += " · " + " · ".join(extras)
     st.caption(cap)
 
     # ── 한 줄 정리 ────────────────────────────
@@ -848,6 +866,43 @@ def show_detail(symbol, df, context=None):
                     st.markdown(f"${it['price']:.2f}　_{pct:+.1f}%_")
                     st.caption(f"{it['label']} — {it['rule']}")
         st.caption(f"기준 종가 ${levels['close']:.2f}　·　ATR(14) ${levels['atr14']:.2f}")
+
+        # 손익비(R:R) — 현재가 진입 가정으로 첫 매도/손절 참고 조합 표시
+        try:
+            cur = levels['close']
+            tp = levels['exit'][0]['price']
+            sl = levels['stop'][0]['price']
+            reward = tp - cur
+            risk = cur - sl
+            if risk > 0 and reward > 0:
+                rr = reward / risk
+                emoji = "🟢" if rr >= 2 else ("🟡" if rr >= 1 else "🔴")
+                st.markdown(
+                    f"**{emoji} 손익비(R:R) {rr:.1f} : 1**　"
+                    f"_손실 \\${risk:.2f} 감수할 때 이익 \\${reward:.2f} 노리는 비율_"
+                )
+                st.caption(
+                    f"계산: 현재가 \\${cur:.2f} → 매도 참고 \\${tp:.2f} (이익 +\\${reward:.2f}) / "
+                    f"손절 참고 \\${sl:.2f} (손실 −\\${risk:.2f})"
+                )
+                with st.popover("📖 손익비(R:R)란?"):
+                    st.markdown(
+                        "**손익비 (Reward:Risk Ratio)**\n\n"
+                        "한 번의 거래에서 노리는 **이익**과 감수하는 **손실**의 비율이에요.\n\n"
+                        "- **1:1** 미만: 손실이 이익보다 큼 — 승률이 매우 높아야 본전\n"
+                        "- **1:1**: 본전 (50% 이상 맞춰야 수익)\n"
+                        "- **2:1** 이상: 권장 기준 — 승률 40%만 돼도 장기적으로 수익\n"
+                        "- **3:1 이상**: 보수적 트레이더의 목표\n\n"
+                        "**왜 중요한가**: 시장은 절반은 맞고 절반은 틀려요. "
+                        "이익을 길게 두고 손실은 짧게 끊으면 승률이 낮아도 살아남아요.\n\n"
+                        "⚠️ **한계**\n"
+                        "- 위 값은 자동 계산한 '눈금자' — 실제 진입 가격은 다를 수 있음\n"
+                        "- 매도·손절 가격 자체도 추정치 → R:R도 참고 수준\n"
+                        "- 시장 큰 갭에선 손절가에서 정확히 못 빠짐"
+                    )
+        except Exception:
+            pass
+
         with st.expander("⚠️ 이 값의 한계 (꼭 읽어보세요)"):
             st.markdown(
                 "- 이런 진입·매도·손절 규칙은 **과거 검증에서 단순 보유를 못 이긴 경우가 많아요**.\n"
