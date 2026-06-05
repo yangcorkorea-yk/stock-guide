@@ -197,6 +197,16 @@ def analyze_tickers(tickers):
     return rows
 
 
+def _escape_md_dollar(text: str) -> str:
+    """Streamlit 마크다운에서 $...$ → LaTeX 수식 모드로 잡혀 폰트가 바뀌는 문제 회피.
+    LLM이 종종 가격을 '$24.16' 식으로 출력하는데 그게 수식으로 인식됨.
+    HTML 렌더링 경로(unsafe_allow_html)는 영향 없으므로 거기엔 적용 X.
+    """
+    if not text:
+        return text
+    return text.replace("$", r"\$")
+
+
 def _pos_52w(df):
     """52주 (lo, hi, cur, pos) 반환. 데이터 부족 시 None."""
     closes = df['close'].tail(252).dropna()
@@ -645,7 +655,7 @@ def show_detail(symbol, df, context=None):
     with st.spinner("AI가 종합하는 중..."):
         ai_text = cached_ai_analysis(symbol, name_hint, payload)
     if ai_text:
-        st.markdown(ai_text)
+        st.markdown(_escape_md_dollar(ai_text))
         st.caption("✨ AI가 위 데이터를 종합한 거예요. 예측·매매 권유가 아니고, 최종 판단은 본인 몫이에요.")
     else:
         st.caption("AI 분석은 잠시 쉬어가요 (`ANTHROPIC_API_KEY` 미설정 또는 호출 실패).")
@@ -759,7 +769,7 @@ def show_detail(symbol, df, context=None):
         name_hint = TICKER_NAMES.get(symbol) or brief.get("name") or symbol
         summary = cached_news_summary(symbol, name_hint, brief.get("sector"), headlines)
         if summary:
-            st.markdown(summary)
+            st.markdown(_escape_md_dollar(summary))
             st.caption("AI가 헤드라인을 요약한 거예요. 자세한 내용은 원문을 확인해 주세요.")
         else:
             st.caption("AI 요약은 잠시 쉬어가요 (키 미설정 또는 호출 실패). 헤드라인만 보여드려요.")
