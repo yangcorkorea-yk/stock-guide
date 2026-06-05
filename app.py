@@ -23,7 +23,7 @@ _TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
 
 def _looks_like_ticker(s: str) -> bool:
     return bool(s and _TICKER_RE.match(s.upper()))
-from analysis import (get_bars, analyze, explain, make_chart, resample_bars,
+from analysis import (get_bars, analyze, explain, make_chart, overlay_signals_on_chart, resample_bars,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context, upcoming_earnings_for_symbols,
@@ -572,6 +572,14 @@ def show_detail(symbol, df, context=None):
         long_df = cached_bars_long(symbol)
         chart_df = resample_bars(long_df, "W" if tf == "주봉" else "M")
 
+    # 일봉일 때만 시그널 미리 계산 → 차트 오버레이 + 아래 섹션에서 재사용
+    sigs = None
+    if tf == "일봉":
+        try:
+            sigs = detect_all(df, lookback=10)
+        except Exception:
+            sigs = None
+
     # 일봉일 때만 참고 가격대(진입/매도/손절) 수평선 표시
     fig = make_chart(chart_df)
     levels = None
@@ -586,9 +594,17 @@ def show_detail(symbol, df, context=None):
                           row=1, col=1, annotation_text="손절 참고", annotation_position="left")
         except Exception:
             levels = None
+        if sigs:
+            try:
+                fig = overlay_signals_on_chart(fig, chart_df, sigs)
+            except Exception:
+                pass
     st.plotly_chart(fig, width="stretch", key=f"chart_{symbol}_{tf}",
                     config=PLOTLY_CONFIG)
-    st.caption(f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)")
+    cap = f"{tf} 기준 · 캔들 빨강=상승, 파랑=하락 · 아래 칸은 RSI(과열도)"
+    if tf == "일봉" and sigs and (sigs["bullish"] or sigs["bearish"] or sigs["neutral"]):
+        cap += " · 차트 위 ▲▼★◇는 포착된 신호 (자세한 설명은 아래 🚦 섹션)"
+    st.caption(cap)
 
     # ── 한 줄 정리 ────────────────────────────
     st.subheader("🗣️ 한 줄 정리")
@@ -768,11 +784,12 @@ def show_detail(symbol, df, context=None):
     st.markdown(f"- **추세** {info['trend']}")
     st.caption(f"기준일 {info['date']}　·　거래량은 무료 IEX 피드라 실제보다 작게 나와요 (절대값 말고 '평소 대비'로만 보세요).")
 
-    # ── 최근 포착된 신호 ───────────────────────
-    try:
-        sigs = detect_all(df, lookback=10)
-    except Exception:
-        sigs = None
+    # ── 최근 포착된 신호 (위 차트에서 계산한 sigs 재사용) ──
+    if sigs is None:
+        try:
+            sigs = detect_all(df, lookback=10)
+        except Exception:
+            sigs = None
     if sigs and (sigs["bullish"] or sigs["bearish"] or sigs["neutral"]):
         st.subheader("🚦 최근 포착된 신호")
         st.caption(
