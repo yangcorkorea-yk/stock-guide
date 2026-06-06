@@ -24,7 +24,7 @@ _TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
 def _looks_like_ticker(s: str) -> bool:
     return bool(s and _TICKER_RE.match(s.upper()))
 from analysis import (get_bars, analyze, explain, make_chart, overlay_signals_on_chart,
-                      overlay_support_resistance, resample_bars,
+                      overlay_support_resistance, resample_bars, vix_regime,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context, upcoming_earnings_for_symbols,
@@ -1203,6 +1203,17 @@ if _mkt:
             color, arrow = "#c92a2a", "▼"
         else:
             color, arrow = "#888", "▪"
+        # VIX는 분위 라벨 추가 (예: 🟢 안정 / 🔴 공포)
+        regime_html = ""
+        if m["label"].startswith("공포지수"):
+            try:
+                regime = vix_regime(float(m["value"].replace(",", "")))
+                regime_html = (
+                    f'<div style="font-size:0.72rem;color:#9aa0a6;margin-top:3px;'
+                    f'letter-spacing:0.02em;">{regime}</div>'
+                )
+            except Exception:
+                pass
         items_html += (
             f'<div style="flex:1 1 calc(50% - 8px);min-width:120px;'
             f'padding:10px 12px;background:rgba(255,255,255,0.04);'
@@ -1212,13 +1223,24 @@ if _mkt:
             f'<span style="font-size:1.4rem;font-weight:600;line-height:1.15;">{m["value"]}</span>'
             f'<span style="font-size:0.9rem;color:{color};font-weight:500;">{arrow}{pct:+.2f}%</span>'
             f'</div>'
+            f'{regime_html}'
             f'</div>'
         )
     st.markdown(
         f'<div style="display:flex;flex-wrap:wrap;gap:8px;width:100%;">{items_html}</div>',
         unsafe_allow_html=True,
     )
-    st.caption("오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요.")
+    # VIX 분위 안내 (있을 때만)
+    vix_help = ""
+    if any(m["label"].startswith("공포지수") for m in _mkt):
+        vix_help = (
+            "　·　**공포지수(VIX)**: 13↓ 매우 안정 / 18↓ 안정 / 25↓ 보통 / "
+            "30↓ 불안 / 30↑ 공포. 20+ 넘으면 시장이 흔들리는 시기."
+        )
+    st.caption(
+        "오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요."
+        + vix_help
+    )
 
 
 # ── 거시 이벤트 캘린더 (모든 탭 위 상단에 노출) ─────────

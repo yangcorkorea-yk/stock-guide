@@ -64,6 +64,35 @@ def get_basic_financials(symbol: str) -> Optional[dict]:
     return data.get("metric") or None
 
 
+def get_economic_calendar(from_date: str, to_date: str,
+                          country: str = "US") -> Optional[list]:
+    """
+    /calendar/economic — 경제 지표 캘린더 (actual/estimate/prev).
+    from_date, to_date: 'YYYY-MM-DD'
+    반환: [{event, actual, estimate, prev, unit, impact, time}, ...]
+    실패 시 None.
+    """
+    data = _get("/calendar/economic", {"from": from_date, "to": to_date})
+    if not data:
+        return None
+    items = data.get("economicCalendar") or []
+    out = []
+    for it in items:
+        c = (it.get("country") or "").upper()
+        if country and c != country:
+            continue
+        out.append({
+            "event": it.get("event") or "",
+            "actual": it.get("actual"),
+            "estimate": it.get("estimate"),
+            "prev": it.get("prev"),
+            "unit": it.get("unit") or "",
+            "impact": it.get("impact") or "",
+            "time": it.get("time") or "",
+        })
+    return out
+
+
 def get_next_earnings(symbol: str) -> Optional[dict]:
     """
     /calendar/earnings — 향후 ~120일 안의 실적 일정 첫 항목.

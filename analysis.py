@@ -464,7 +464,40 @@ def market_context():
     except Exception:
         pass
 
+    # VIX 폴백: yfinance 실패 시 Stooq에서 CSV 받기 (API 키 불필요)
+    have_vix = any(it["label"].startswith("공포지수") for it in out)
+    if not have_vix:
+        try:
+            import requests
+            r = requests.get("https://stooq.com/q/d/l/?s=^vix&i=d", timeout=8)
+            if r.status_code == 200:
+                lines = [ln.strip() for ln in r.text.strip().split("\n") if ln.strip()]
+                if len(lines) >= 3:
+                    last = lines[-1].split(",")
+                    prev = lines[-2].split(",")
+                    cur_v = float(last[4])
+                    prv_v = float(prev[4])
+                    out.append({"label": "공포지수(VIX)",
+                                "value": f"{cur_v:,.1f}",
+                                "pct": (cur_v / prv_v - 1) * 100,
+                                "kind": "level"})
+        except Exception:
+            pass
+
     return out
+
+
+def vix_regime(value: float) -> str:
+    """VIX 절대값을 사람이 읽을 수 있는 분위 라벨로."""
+    if value < 13:
+        return "🟢 매우 안정"
+    if value < 18:
+        return "🟢 안정"
+    if value < 25:
+        return "🟡 보통"
+    if value < 30:
+        return "🟠 불안"
+    return "🔴 공포"
 
 
 def resample_bars(df, tf):
