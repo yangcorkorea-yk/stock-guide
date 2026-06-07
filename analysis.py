@@ -497,6 +497,25 @@ def market_context():
     except Exception:
         pass
 
+    # 미국 국채 금리 + 장단기 스프레드 (FRED)
+    try:
+        from fred_client import get_yield_snapshot
+        ys = get_yield_snapshot()
+        if ys:
+            if "dgs10" in ys:
+                out.append({"label": "10Y 국채",
+                            "value": f"{ys['dgs10']:.2f}%",
+                            "pct": (ys["dgs10"] - ys.get("prev_dgs10", ys["dgs10"])) * 100,
+                            "kind": "yield"})
+            if "t10y2y" in ys:
+                out.append({"label": "10Y−2Y 스프레드",
+                            "value": f"{ys['t10y2y']:.2f}%",
+                            "pct": (ys["t10y2y"] - ys.get("prev_t10y2y", ys["t10y2y"])) * 100,
+                            "kind": "spread",
+                            "spread_value": ys["t10y2y"]})
+    except Exception:
+        pass
+
     return out
 
 

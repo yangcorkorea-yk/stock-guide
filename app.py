@@ -253,6 +253,16 @@ def _cached_8k(symbol: str, days: int = 14):
         return None
 
 
+@st.cache_data(ttl=12 * 3600, show_spinner=False)
+def _cached_fred_trend(tag: str):
+    """FRED 거시 시리즈 추이 (12시간 캐시 — 월간 시리즈가 대부분)."""
+    try:
+        import fred_client
+        return fred_client.get_indicator_trend(tag)
+    except Exception:
+        return None
+
+
 def _build_ai_payload(symbol, df, info, brief, levels):
     """AI 종합 분석에 넘길 데이터 텍스트 구성. 값은 라운딩해 캐시 안정화."""
     lines = []
@@ -1322,6 +1332,20 @@ if _mkt:
                 pass
             # F&G는 pct가 점수 변화 (절대값)이므로 %가 아닌 "전일比 +N" 형태
             pct_str = f"{arrow}{pct:+.0f}"
+        elif m.get("kind") == "spread":
+            # 장단기 스프레드 분위
+            try:
+                from fred_client import yield_curve_label
+                regime_html = (
+                    f'<div style="font-size:0.72rem;color:#9aa0a6;margin-top:3px;'
+                    f'letter-spacing:0.02em;">{yield_curve_label(float(m["spread_value"]))}</div>'
+                )
+            except Exception:
+                pass
+            pct_str = f"{arrow}{pct:+.0f}bp"
+        elif m.get("kind") == "yield":
+            # 국채 금리: bp(베이시스 포인트) 표시
+            pct_str = f"{arrow}{pct:+.0f}bp"
         else:
             pct_str = f"{arrow}{pct:+.2f}%"
         items_html += (
@@ -1391,6 +1415,32 @@ if _events:
                         'background:rgba(245,158,11,0.12);padding:1px 6px;'
                         'border-radius:6px;">추정</span>'
                         if e.get("is_estimate") else "")
+            # D-7 이내 임박 이벤트엔 FRED 추이 컨텍스트 제공
+            trend_html = ""
+            if d is not None and 0 <= d <= 7:
+                try:
+                    from fred_client import get_indicator_trend
+                    tr = _cached_fred_trend(e.get("tag", ""))
+                    if tr:
+                        pts = tr["points"][:5]
+                        spark = " · ".join(
+                            f"{p['date'][:7]} {p['value']:+.2f}{tr['unit']}"
+                            if tr['unit'].startswith('%')
+                            else f"{p['date'][:7]} {p['value']:,.0f}{tr['unit']}"
+                            for p in reversed(pts)
+                        )
+                        trend_html = (
+                            f'<div style="margin-top:8px;padding:8px 12px;'
+                            f'background:rgba(16,185,129,0.06);border-radius:6px;'
+                            f'font-size:0.82rem;line-height:1.6;">'
+                            f'<strong style="color:#10b981;">📊 {tr["label"]} '
+                            f'직전 추이 {tr["trend"]}</strong> '
+                            f'(FRED · 최신 {tr["latest"]:+.2f}{tr["unit"]})<br>'
+                            f'<span style="font-size:0.78rem;opacity:0.85;">{spark}</span>'
+                            f'</div>'
+                        )
+                except Exception:
+                    pass
             # summary 1줄 + 펼치면 상세 해석
             summary_html = (
                 f'<summary style="cursor:pointer;list-style:none;'
@@ -1442,7 +1492,7 @@ if _events:
                 )
             st.markdown(
                 f'<details>{summary_html}'
-                f'<div style="padding:8px 4px 14px 4px;">{"".join(body_parts)}</div>'
+                f'<div style="padding:8px 4px 14px 4px;">{trend_html}{"".join(body_parts)}</div>'
                 f'</details>',
                 unsafe_allow_html=True,
             )

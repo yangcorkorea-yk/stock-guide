@@ -79,6 +79,26 @@ def collect_payload():
     except Exception:
         pass
 
+    # 1-c) 금리 환경 — FRED 10Y/2Y/스프레드
+    try:
+        from fred_client import get_yield_snapshot, yield_curve_label
+        ys = get_yield_snapshot()
+        if ys:
+            lines.append("\n[금리 환경]")
+            if "dgs10" in ys:
+                diff10 = (ys["dgs10"] - ys.get("prev_dgs10", ys["dgs10"])) * 100
+                lines.append(f"- 10Y 국채: {ys['dgs10']:.2f}% ({diff10:+.0f}bp)")
+            if "dgs2" in ys:
+                diff2 = (ys["dgs2"] - ys.get("prev_dgs2", ys["dgs2"])) * 100
+                lines.append(f"- 2Y 국채: {ys['dgs2']:.2f}% ({diff2:+.0f}bp)")
+            if "t10y2y" in ys:
+                lines.append(
+                    f"- 10Y−2Y 스프레드: {ys['t10y2y']:+.2f}% "
+                    f"({yield_curve_label(ys['t10y2y'])})"
+                )
+    except Exception:
+        pass
+
     # 2) 향후 14일 거시 이벤트
     upcoming = upcoming_events(days=14, today=today)
     if upcoming:
