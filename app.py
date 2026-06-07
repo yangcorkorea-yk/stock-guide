@@ -24,7 +24,7 @@ _TICKER_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z]{1,2})?$")
 def _looks_like_ticker(s: str) -> bool:
     return bool(s and _TICKER_RE.match(s.upper()))
 from analysis import (get_bars, analyze, explain, make_chart, overlay_signals_on_chart,
-                      overlay_support_resistance, resample_bars,
+                      overlay_support_resistance, resample_bars, vix_regime,
                       RSI_HELP, BB_HELP, SECTORS, THEMES, company_brief,
                       reference_levels, FUNDAMENTALS_HELP, make_comparison_chart,
                       find_peer_group, market_context, upcoming_earnings_for_symbols,
@@ -231,6 +231,36 @@ def _range_bar_52w(df):
 def cached_ai_analysis(symbol, name, payload_text):
     """AI 종합 분석 캐시 (1시간). payload_text가 캐시 키 역할."""
     return synthesize_analysis_ko(symbol, name, payload_text)
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _cached_insider(symbol: str, days: int = 30):
+    """SEC Form 4 요약 (6시간 캐시 — 공시는 4영업일 이내라 자주 안 바뀜)."""
+    try:
+        import sec_edgar
+        return sec_edgar.summarize_insider_activity(symbol, days=days)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_8k(symbol: str, days: int = 14):
+    """SEC 8-K 요약 (1시간 캐시)."""
+    try:
+        import sec_edgar
+        return sec_edgar.summarize_8k_activity(symbol, days=days)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=12 * 3600, show_spinner=False)
+def _cached_fred_trend(tag: str):
+    """FRED 거시 시리즈 추이 (12시간 캐시 — 월간 시리즈가 대부분)."""
+    try:
+        import fred_client
+        return fred_client.get_indicator_trend(tag)
+    except Exception:
+        return None
 
 
 def _build_ai_payload(symbol, df, info, brief, levels):
@@ -754,6 +784,80 @@ def show_detail(symbol, df, context=None):
             st.caption("데이터 출처: Yahoo Finance. 분기 보고서 시차로 한국 증권사 화면과 1~2% 차이 날 수 있어요.")
             st.markdown(FUNDAMENTALS_HELP)
 
+    # ── 내부자 거래 (SEC Form 4) ──────────────
+    try:
+        import sec_edgar as _sec
+        insider = _cached_insider(symbol, days=30)
+    except Exception:
+        insider = None
+    if insider and insider.get("filings_count", 0) > 0:
+        st.subheader("🧑‍💼 최근 내부자 거래 (30일)")
+        st.caption("SEC EDGAR Form 4 — 학계 연구상 임원·이사의 **시장가 매수**는 약한 강세 신호로 거론됩니다.")
+        buys = insider.get("buys") or []
+        sells = insider.get("sells") or []
+        buy_v = insider.get("buy_total_value", 0)
+        sell_v = insider.get("sell_total_value", 0)
+        ic1, ic2 = st.columns(2)
+        with ic1:
+            st.markdown(f"**📈 매수** {len(buys)}건 · ${buy_v/1e6:,.2f}M")
+            if buys:
+                for b in buys[:5]:
+                    st.markdown(
+                        f"- {b['date']} · {b['owner']} ({b['title']}) — "
+                        f"{b['shares']:,}주 (\\${b['value']/1e6:,.2f}M)"
+                    )
+            else:
+                st.caption("(시장가 매수 없음)")
+        with ic2:
+            st.markdown(f"**📉 매도** {len(sells)}건 · ${sell_v/1e6:,.2f}M")
+            if sells:
+                for s in sells[:5]:
+                    st.markdown(
+                        f"- {s['date']} · {s['owner']} ({s['title']}) — "
+                        f"{s['shares']:,}주 (\\${s['value']/1e6:,.2f}M)"
+                    )
+            else:
+                st.caption("(시장가 매도 없음)")
+        sec_url = insider.get("filings_url") or ""
+        if sec_url:
+            st.caption(
+                f"전체 신고서: [SEC EDGAR Form 4]({sec_url}) · "
+                f"파싱 {insider.get('parsed_count', 0)}/{insider.get('filings_count', 0)}건"
+            )
+        # 사전 연결
+        gentry = glossary.get("내부자 거래 (Form 4)")
+        if gentry:
+            with st.popover(f"📖 {gentry['title']} 자세히 보기"):
+                st.markdown(f"**{gentry['summary']}**")
+                st.markdown("---")
+                st.markdown(gentry["body"])
+
+    # ── 8-K (중요 사건 공시) — 평소보다 잦으면 표시 ──
+    try:
+        eight_k = _cached_8k(symbol, days=14)
+    except Exception:
+        eight_k = None
+    if eight_k and eight_k.get("count", 0) >= 3:
+        n = eight_k["count"]
+        emoji = "🚨" if n >= 5 else "📋"
+        st.subheader(f"{emoji} 최근 8-K 공시 — 14일간 {n}건")
+        st.caption(
+            "8-K = SEC가 정한 **중요 사건 발생 시 4영업일 이내 공시** 의무. "
+            "한 회사가 단기간에 잦으면 큰 변화·이슈가 있을 수 있어요."
+        )
+        for f in eight_k["filings"][:10]:
+            items_str = " · ".join(f["items_decoded"]) or "Item 정보 없음"
+            st.markdown(f"- **{f['date']}** — {items_str}　[원문]({f['url']})")
+        eight_k_url = eight_k.get("filings_url") or ""
+        if eight_k_url:
+            st.caption(f"전체 8-K 목록: [SEC EDGAR]({eight_k_url})")
+        gentry = glossary.get("8-K 공시")
+        if gentry:
+            with st.popover(f"📖 {gentry['title']} 자세히 보기"):
+                st.markdown(f"**{gentry['summary']}**")
+                st.markdown("---")
+                st.markdown(gentry["body"])
+
     # ── 뉴스 ─────────────────────────────────
     st.subheader("📰 최근 뉴스")
     news_items = cached_news(symbol)
@@ -1193,6 +1297,7 @@ def _cached_market():
 
 _mkt = _cached_market()
 if _mkt:
+    import fear_greed as _fg_mod
     # 각 항목: 라벨(위) + 주가·등락(같은 행) + 카드 가운데 정렬
     items_html = ""
     for m in _mkt:
@@ -1203,6 +1308,46 @@ if _mkt:
             color, arrow = "#c92a2a", "▼"
         else:
             color, arrow = "#888", "▪"
+        # VIX 분위 라벨 (예: 🟢 안정 / 🔴 공포)
+        regime_html = ""
+        if m["label"].startswith("공포지수(VIX)"):
+            try:
+                regime = vix_regime(float(m["value"].replace(",", "")))
+                regime_html = (
+                    f'<div style="font-size:0.72rem;color:#9aa0a6;margin-top:3px;'
+                    f'letter-spacing:0.02em;">{regime}</div>'
+                )
+            except Exception:
+                pass
+        # Fear & Greed: pct는 점수 변화로 해석, +점수 = 탐욕쪽 이동 (역설적으로 위험)
+        is_fg = m.get("kind") == "fg"
+        if is_fg:
+            try:
+                regime = _fg_mod.regime_ko(float(m["fg_score"]))
+                regime_html = (
+                    f'<div style="font-size:0.72rem;color:#9aa0a6;margin-top:3px;'
+                    f'letter-spacing:0.02em;">{regime}</div>'
+                )
+            except Exception:
+                pass
+            # F&G는 pct가 점수 변화 (절대값)이므로 %가 아닌 "전일比 +N" 형태
+            pct_str = f"{arrow}{pct:+.0f}"
+        elif m.get("kind") == "spread":
+            # 장단기 스프레드 분위
+            try:
+                from fred_client import yield_curve_label
+                regime_html = (
+                    f'<div style="font-size:0.72rem;color:#9aa0a6;margin-top:3px;'
+                    f'letter-spacing:0.02em;">{yield_curve_label(float(m["spread_value"]))}</div>'
+                )
+            except Exception:
+                pass
+            pct_str = f"{arrow}{pct:+.0f}bp"
+        elif m.get("kind") == "yield":
+            # 국채 금리: bp(베이시스 포인트) 표시
+            pct_str = f"{arrow}{pct:+.0f}bp"
+        else:
+            pct_str = f"{arrow}{pct:+.2f}%"
         items_html += (
             f'<div style="flex:1 1 calc(50% - 8px);min-width:120px;'
             f'padding:10px 12px;background:rgba(255,255,255,0.04);'
@@ -1210,15 +1355,30 @@ if _mkt:
             f'<div style="font-size:0.85rem;color:#9aa0a6;margin-bottom:4px;">{m["label"]}</div>'
             f'<div style="display:flex;justify-content:center;align-items:baseline;gap:8px;flex-wrap:wrap;">'
             f'<span style="font-size:1.4rem;font-weight:600;line-height:1.15;">{m["value"]}</span>'
-            f'<span style="font-size:0.9rem;color:{color};font-weight:500;">{arrow}{pct:+.2f}%</span>'
+            f'<span style="font-size:0.9rem;color:{color};font-weight:500;">{pct_str}</span>'
             f'</div>'
+            f'{regime_html}'
             f'</div>'
         )
     st.markdown(
         f'<div style="display:flex;flex-wrap:wrap;gap:8px;width:100%;">{items_html}</div>',
         unsafe_allow_html=True,
     )
-    st.caption("오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요.")
+    # VIX·F&G 해석 안내 (둘 다 있을 수 있음)
+    helps = []
+    if any(m["label"].startswith("공포지수(VIX)") for m in _mkt):
+        helps.append(
+            "**VIX**: 13↓ 매우 안정 / 18↓ 안정 / 25↓ 보통 / 30↓ 불안 / 30↑ 공포"
+        )
+    if any(m.get("kind") == "fg" for m in _mkt):
+        helps.append(
+            "**공포·탐욕**: 25↓ 극도 공포 / 45↓ 공포 / 55↓ 중립 / 75↓ 탐욕 / 75↑ 극도 탐욕"
+        )
+    extra = ("　·　" + "　·　".join(helps)) if helps else ""
+    st.caption(
+        "오늘 시장 분위기예요. 내 종목이 시장 따라 움직이는지, 혼자 움직이는지 가늠해 보세요."
+        + extra
+    )
 
 
 # ── 거시 이벤트 캘린더 (모든 탭 위 상단에 노출) ─────────
@@ -1255,6 +1415,32 @@ if _events:
                         'background:rgba(245,158,11,0.12);padding:1px 6px;'
                         'border-radius:6px;">추정</span>'
                         if e.get("is_estimate") else "")
+            # D-7 이내 임박 이벤트엔 FRED 추이 컨텍스트 제공
+            trend_html = ""
+            if d is not None and 0 <= d <= 7:
+                try:
+                    from fred_client import get_indicator_trend
+                    tr = _cached_fred_trend(e.get("tag", ""))
+                    if tr:
+                        pts = tr["points"][:5]
+                        spark = " · ".join(
+                            f"{p['date'][:7]} {p['value']:+.2f}{tr['unit']}"
+                            if tr['unit'].startswith('%')
+                            else f"{p['date'][:7]} {p['value']:,.0f}{tr['unit']}"
+                            for p in reversed(pts)
+                        )
+                        trend_html = (
+                            f'<div style="margin-top:8px;padding:8px 12px;'
+                            f'background:rgba(16,185,129,0.06);border-radius:6px;'
+                            f'font-size:0.82rem;line-height:1.6;">'
+                            f'<strong style="color:#10b981;">📊 {tr["label"]} '
+                            f'직전 추이 {tr["trend"]}</strong> '
+                            f'(FRED · 최신 {tr["latest"]:+.2f}{tr["unit"]})<br>'
+                            f'<span style="font-size:0.78rem;opacity:0.85;">{spark}</span>'
+                            f'</div>'
+                        )
+                except Exception:
+                    pass
             # summary 1줄 + 펼치면 상세 해석
             summary_html = (
                 f'<summary style="cursor:pointer;list-style:none;'
@@ -1306,7 +1492,7 @@ if _events:
                 )
             st.markdown(
                 f'<details>{summary_html}'
-                f'<div style="padding:8px 4px 14px 4px;">{"".join(body_parts)}</div>'
+                f'<div style="padding:8px 4px 14px 4px;">{trend_html}{"".join(body_parts)}</div>'
                 f'</details>',
                 unsafe_allow_html=True,
             )

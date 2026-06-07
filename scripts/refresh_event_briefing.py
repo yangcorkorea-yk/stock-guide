@@ -27,6 +27,75 @@ from analysis import get_bars
 from news_client import fetch_news
 from macro_calendar import _auto_events, _load_curated
 from llm_client import synthesize_event_briefing_ko
+from finnhub_client import get_economic_calendar
+
+
+# 우리 macro_calendar 태그 → Finnhub 'event' 키워드 매칭
+TAG_TO_KEYWORDS = {
+    "📊 CPI":   ["CPI", "Consumer Price"],
+    "📈 PPI":   ["PPI", "Producer Price"],
+    "💵 PCE":   ["PCE", "Personal Consumption"],
+    "📈 GDP":   ["GDP"],
+    "💼 NFP":   ["Nonfarm Payrolls", "Unemployment"],
+    "👥 ADP":   ["ADP"],
+    "🏭 ISM":   ["ISM Manufacturing", "Manufacturing PMI"],
+    "🛎️ ISM":  ["ISM Non-Manufacturing", "Services PMI", "ISM Services"],
+    "📋 JOLTS": ["JOLTs", "JOLTS", "Job Openings"],
+    "🏦 FOMC":  ["FOMC", "Fed Interest Rate", "Federal Funds"],
+}
+
+
+def collect_actuals(yd: date, ev: dict) -> str:
+    """Finnhub 경제 캘린더에서 yd ± 1일의 US 지표 actuals 가져와 텍스트화."""
+    tag = ev.get("tag", "")
+    keywords = TAG_TO_KEYWORDS.get(tag, [])
+    if not keywords:
+        return ""
+    start = (yd - timedelta(days=1)).isoformat()
+    end = (yd + timedelta(days=1)).isoformat()
+    items = get_economic_calendar(start, end, country="US")
+    if not items:
+        return ""
+
+    def _match(event_name: str) -> bool:
+        en = event_name.lower()
+        return any(k.lower() in en for k in keywords)
+
+    matched = [it for it in items if _match(it.get("event", ""))]
+    if not matched:
+        return ""
+
+    lines = []
+    for it in matched:
+        ev_name = it.get("event") or "?"
+        actual = it.get("actual")
+        est = it.get("estimate")
+        prev = it.get("prev")
+        unit = it.get("unit") or ""
+        line = f"- {ev_name}"
+        parts = []
+        if actual is not None:
+            parts.append(f"실제 {actual}{unit}")
+        if est is not None:
+            parts.append(f"예상 {est}{unit}")
+        if prev is not None:
+            parts.append(f"이전 {prev}{unit}")
+        if parts:
+            line += " | " + " · ".join(parts)
+        # 의외성 (실제 vs 예상)
+        try:
+            if actual is not None and est is not None:
+                surprise = float(actual) - float(est)
+                if surprise > 0:
+                    line += f" → 예상보다 강함 (+{surprise:.2f}{unit})"
+                elif surprise < 0:
+                    line += f" → 예상보다 약함 ({surprise:.2f}{unit})"
+                else:
+                    line += " → 예상 부합"
+        except Exception:
+            pass
+        lines.append(line)
+    return "\n".join(lines)
 
 OUT = ROOT / "data" / "event_briefings.json"
 KEEP = 6  # 최근 N개 브리핑 보관
@@ -110,7 +179,12 @@ def main():
     new_briefings = []
     for ev in events:
         print(f"\n→ {ev['name']} ({ev.get('tag','')}) LLM 호출...")
-        r = synthesize_event_briefing_ko(ev, market, news)
+        actuals = collect_actuals(yd, ev)
+        if actuals:
+            print(f"  📊 actuals 확보:\n{actuals}")
+        else:
+            print(f"  ⚠️ actuals 없음 (Finnhub 미설정·미스매치)")
+        r = synthesize_event_briefing_ko(ev, market, news, actuals=actuals)
         if not r or not r.get("summary"):
             print(f"  ❌ 생성 실패: {r}")
             continue
