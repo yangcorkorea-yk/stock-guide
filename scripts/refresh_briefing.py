@@ -69,6 +69,16 @@ def collect_payload():
             market_date = mdate
         lines.append(f"- {s}: ${price:.2f} ({pct:+.2f}%)")
 
+    # 1-b) 시장 심리 — Fear & Greed Index
+    try:
+        from fear_greed import fetch_fear_greed, context_text
+        fg = fetch_fear_greed()
+        if fg:
+            lines.append("\n[시장 심리]")
+            lines.append("- " + context_text(fg))
+    except Exception:
+        pass
+
     # 2) 향후 14일 거시 이벤트
     upcoming = upcoming_events(days=14, today=today)
     if upcoming:

@@ -484,6 +484,19 @@ def market_context():
         except Exception:
             pass
 
+    # Fear & Greed Index (CNN) — 시장 심리 종합 0~100
+    try:
+        from fear_greed import fetch_fear_greed
+        fg = fetch_fear_greed()
+        if fg:
+            out.append({"label": "공포·탐욕(F&G)",
+                        "value": f"{fg['score']:.0f}",
+                        "pct": fg["score"] - fg["prev_close"],
+                        "kind": "fg",
+                        "fg_score": fg["score"]})
+    except Exception:
+        pass
+
     return out
 
 
