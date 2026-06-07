@@ -1249,9 +1249,13 @@ if _brief and _brief.get("briefing"):
 
 
 # ── 거시 이벤트 5분 브리핑 (FOMC/CPI 등 발표 다음날 자동) ──
+# 노출 정책: 최근 7일 이내 + 최대 3건 (오래된 브리핑이 위에 남는 문제 방지)
+import datetime as _dt
 _evs_data = load_event_briefings()
 _evs_list = (_evs_data or {}).get("event_briefings") or []
-for _ev in _evs_list[:2]:  # 가장 최근 2건까지 노출
+_cutoff = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+_evs_list = [e for e in _evs_list if (e.get("date") or "") >= _cutoff][:3]
+for _ev in _evs_list:
     _eh = (_ev.get("headline") or "").strip()
     _esum = (_ev.get("summary") or "").strip().replace("\n", "<br>")
     _emr = (_ev.get("market_reaction") or "").strip().replace("\n", "<br>")

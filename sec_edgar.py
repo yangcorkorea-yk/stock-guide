@@ -172,22 +172,62 @@ def _parse_form4_xml(text: str) -> Optional[dict]:
     }
 
 
+import re
+
+
+def _form4_xml_candidates(filing: dict) -> list[str]:
+    """
+    Form 4 raw XML URL 후보들 — primaryDocument가 xslF345X03/* 경로면
+    부모(=실제 XML)로도 시도해본다.
+    """
+    url = filing.get("primary_url") or ""
+    primary_doc = filing.get("primary_doc") or ""
+    candidates = []
+    if url:
+        candidates.append(url)
+    # /xslXXX/foo.xml → /foo.xml 로 변환
+    clean = re.sub(r"/xsl[^/]+/", "/", url)
+    if clean and clean != url:
+        candidates.append(clean)
+    # primaryDocument 자체가 'xsl.../foo.xml' 형태면 부모 폴더에서 'foo.xml' 직접 시도
+    if "/" in primary_doc and primary_doc.lower().startswith("xsl"):
+        base = url.rsplit("/", 1)[0]
+        # 'xsl.../foo.xml' 에서 'foo.xml' 추출
+        last_part = primary_doc.split("/", 1)[1]
+        candidates.append(f"{base.rsplit('/', 1)[0]}/{last_part}")
+    # 중복 제거 유지
+    seen = set()
+    out = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
 def fetch_form4_detail(filing: dict) -> Optional[dict]:
-    """Form 4 한 건의 거래 상세."""
-    url = filing.get("primary_url")
-    if not url:
+    """
+    Form 4 한 건의 거래 상세.
+    여러 URL 후보를 순차 시도 — SEC가 'primaryDocument'로 xsl 래퍼(HTML)를
+    주기 때문에 그 경로에선 XML 파싱이 실패함. 부모 경로의 raw XML 도 같이 시도.
+    """
+    candidates = _form4_xml_candidates(filing)
+    if not candidates:
         return None
-    try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        ct = (r.headers.get("Content-Type") or "").lower()
-        text = r.text
-        if not (text.lstrip().startswith("<?xml") or "<ownershipDocument" in text):
-            return None
-        return _parse_form4_xml(text)
-    except Exception:
-        return None
+    for url in candidates:
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT)
+            if r.status_code != 200:
+                continue
+            text = r.text
+            if "<ownershipDocument" not in text and not text.lstrip().startswith("<?xml"):
+                continue
+            parsed = _parse_form4_xml(text)
+            if parsed is not None:
+                return parsed
+        except Exception:
+            continue
+    return None
 
 
 def summarize_insider_activity(ticker: str, days: int = 30,
