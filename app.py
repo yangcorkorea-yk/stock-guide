@@ -233,6 +233,26 @@ def cached_ai_analysis(symbol, name, payload_text):
     return synthesize_analysis_ko(symbol, name, payload_text)
 
 
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _cached_insider(symbol: str, days: int = 30):
+    """SEC Form 4 요약 (6시간 캐시 — 공시는 4영업일 이내라 자주 안 바뀜)."""
+    try:
+        import sec_edgar
+        return sec_edgar.summarize_insider_activity(symbol, days=days)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_8k(symbol: str, days: int = 14):
+    """SEC 8-K 요약 (1시간 캐시)."""
+    try:
+        import sec_edgar
+        return sec_edgar.summarize_8k_activity(symbol, days=days)
+    except Exception:
+        return None
+
+
 def _build_ai_payload(symbol, df, info, brief, levels):
     """AI 종합 분석에 넘길 데이터 텍스트 구성. 값은 라운딩해 캐시 안정화."""
     lines = []
@@ -753,6 +773,80 @@ def show_detail(symbol, df, context=None):
             )
             st.caption("데이터 출처: Yahoo Finance. 분기 보고서 시차로 한국 증권사 화면과 1~2% 차이 날 수 있어요.")
             st.markdown(FUNDAMENTALS_HELP)
+
+    # ── 내부자 거래 (SEC Form 4) ──────────────
+    try:
+        import sec_edgar as _sec
+        insider = _cached_insider(symbol, days=30)
+    except Exception:
+        insider = None
+    if insider and insider.get("filings_count", 0) > 0:
+        st.subheader("🧑‍💼 최근 내부자 거래 (30일)")
+        st.caption("SEC EDGAR Form 4 — 학계 연구상 임원·이사의 **시장가 매수**는 약한 강세 신호로 거론됩니다.")
+        buys = insider.get("buys") or []
+        sells = insider.get("sells") or []
+        buy_v = insider.get("buy_total_value", 0)
+        sell_v = insider.get("sell_total_value", 0)
+        ic1, ic2 = st.columns(2)
+        with ic1:
+            st.markdown(f"**📈 매수** {len(buys)}건 · ${buy_v/1e6:,.2f}M")
+            if buys:
+                for b in buys[:5]:
+                    st.markdown(
+                        f"- {b['date']} · {b['owner']} ({b['title']}) — "
+                        f"{b['shares']:,}주 (\\${b['value']/1e6:,.2f}M)"
+                    )
+            else:
+                st.caption("(시장가 매수 없음)")
+        with ic2:
+            st.markdown(f"**📉 매도** {len(sells)}건 · ${sell_v/1e6:,.2f}M")
+            if sells:
+                for s in sells[:5]:
+                    st.markdown(
+                        f"- {s['date']} · {s['owner']} ({s['title']}) — "
+                        f"{s['shares']:,}주 (\\${s['value']/1e6:,.2f}M)"
+                    )
+            else:
+                st.caption("(시장가 매도 없음)")
+        sec_url = insider.get("filings_url") or ""
+        if sec_url:
+            st.caption(
+                f"전체 신고서: [SEC EDGAR Form 4]({sec_url}) · "
+                f"파싱 {insider.get('parsed_count', 0)}/{insider.get('filings_count', 0)}건"
+            )
+        # 사전 연결
+        gentry = glossary.get("내부자 거래 (Form 4)")
+        if gentry:
+            with st.popover(f"📖 {gentry['title']} 자세히 보기"):
+                st.markdown(f"**{gentry['summary']}**")
+                st.markdown("---")
+                st.markdown(gentry["body"])
+
+    # ── 8-K (중요 사건 공시) — 평소보다 잦으면 표시 ──
+    try:
+        eight_k = _cached_8k(symbol, days=14)
+    except Exception:
+        eight_k = None
+    if eight_k and eight_k.get("count", 0) >= 3:
+        n = eight_k["count"]
+        emoji = "🚨" if n >= 5 else "📋"
+        st.subheader(f"{emoji} 최근 8-K 공시 — 14일간 {n}건")
+        st.caption(
+            "8-K = SEC가 정한 **중요 사건 발생 시 4영업일 이내 공시** 의무. "
+            "한 회사가 단기간에 잦으면 큰 변화·이슈가 있을 수 있어요."
+        )
+        for f in eight_k["filings"][:10]:
+            items_str = " · ".join(f["items_decoded"]) or "Item 정보 없음"
+            st.markdown(f"- **{f['date']}** — {items_str}　[원문]({f['url']})")
+        eight_k_url = eight_k.get("filings_url") or ""
+        if eight_k_url:
+            st.caption(f"전체 8-K 목록: [SEC EDGAR]({eight_k_url})")
+        gentry = glossary.get("8-K 공시")
+        if gentry:
+            with st.popover(f"📖 {gentry['title']} 자세히 보기"):
+                st.markdown(f"**{gentry['summary']}**")
+                st.markdown("---")
+                st.markdown(gentry["body"])
 
     # ── 뉴스 ─────────────────────────────────
     st.subheader("📰 최근 뉴스")
